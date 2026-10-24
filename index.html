@@ -23,7 +23,8 @@
   --f-type:"Special Elite", "Courier New", ui-monospace, monospace;
   color-scheme:light;
 }
-html,body{height:100%}
+html{background:var(--desk)}
+html,body{min-height:100%}
 body{
   background:var(--desk);
   background-image:radial-gradient(circle at 20% 10%, rgba(255,255,255,.06), transparent 50%),
@@ -31,29 +32,34 @@ body{
   color:var(--ink); font-family:var(--f-body); font-size:18px; line-height:1.5;
   padding-left:max(16px, env(safe-area-inset-left, 0px));
   padding-right:max(16px, env(safe-area-inset-right, 0px));
-  padding-block:16px 32px;
+  padding-block:16px calc(16px + env(safe-area-inset-bottom, 0px));
   -webkit-tap-highlight-color:transparent;
 }
 #app{max-width:560px; margin:0 auto}
+@media (min-width:700px){ #app{max-width:640px} }
 .folder{
   position:relative; background:var(--folder); border-radius:4px 14px 10px 10px;
   box-shadow:0 2px 0 var(--folder-edge), 0 18px 40px rgba(0,0,0,.35);
   padding:28px 20px 24px; margin-top:22px;
 }
-.folder::before{ /* folder tab */
-  content:""; position:absolute; top:-20px; left:0; width:42%; height:22px;
-  background:var(--folder); border-radius:10px 10px 0 0;
-}
-.tab-label{position:absolute; top:-15px; left:16px; font-family:var(--f-type); font-size:14px; color:var(--ink-soft); letter-spacing:.06em}
+
+/* the label is the folder tab, so the tab always fits its text; a long team name is shortened, the step number never */
+.tab-label{position:absolute; top:-20px; left:0; display:flex; box-sizing:border-box; min-width:42%; max-width:calc(100% - 24px); height:22px;
+  padding:4px 16px 0; background:var(--folder); border-radius:10px 10px 0 0; white-space:nowrap;
+  font-family:var(--f-type); font-size:14px; line-height:18px; color:var(--ink-soft); letter-spacing:.06em}
+.tab-label .tl-a{overflow:hidden; text-overflow:ellipsis; min-width:0}
+.tab-label .tl-b{flex:none}
+@media (max-width:400px){ .tab-label{font-size:12px; letter-spacing:.03em; padding-inline:12px} }
 .stack{display:flex; flex-direction:column; gap:16px}
 .stamp{
   display:inline-block; font-family:var(--f-display); color:var(--stamp);
   border:3px solid var(--stamp); border-radius:6px; padding:2px 10px; font-size:15px;
   transform:rotate(-6deg); letter-spacing:.06em; opacity:.88; align-self:flex-start;
 }
-h1,h2{font-family:var(--f-display); font-weight:400; line-height:1.1; margin:0; text-wrap:balance}
-h1{font-size:clamp(28px, 8vw, 40px)}
-h2{font-size:clamp(22px, 6vw, 28px)}
+h1,h2{font-family:var(--f-display); font-weight:400; line-height:1.1; margin:0; text-wrap:balance; overflow-wrap:break-word; hyphens:auto}
+/* sized so the longest word ("VERJAARDAGSTAART") still fits a 320px phone */
+h1{font-size:clamp(21px, 6.4vw, 40px)}
+h2{font-size:clamp(20px, 5.6vw, 28px)}
 p{margin:0}
 .type{font-family:var(--f-type)}
 .muted{color:var(--ink-soft)}
@@ -66,7 +72,7 @@ p{margin:0}
 .paper.tilt{transform:rotate(-.6deg)}
 .tape{position:absolute; top:-12px; left:50%; width:96px; height:24px; margin-left:-48px;
   background:var(--tape); opacity:.85; transform:rotate(3deg); box-shadow:0 1px 2px rgba(0,0,0,.15)}
-.riddle{font-size:22px; font-weight:600; line-height:1.45; white-space:pre-line}
+.riddle{font-size:clamp(18px, 5.6vw, 22px); font-weight:600; line-height:1.45; white-space:pre-line}
 .btn{
   appearance:none; border:0; border-radius:12px; min-height:56px; padding:12px 20px;
   font:800 19px/1.2 var(--f-body); cursor:pointer; color:#fff; background:var(--stamp);
@@ -108,20 +114,22 @@ label.lbl{font-size:14px; font-weight:600; color:var(--ink-soft); display:block;
 .notes-list{font-family:var(--f-type); font-size:18px; display:flex; flex-direction:column; gap:8px}
 .notes-list div{background:var(--paper); padding:10px 12px; border-radius:4px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap}
 .notes-list b{letter-spacing:.15em; color:var(--stamp)}
-.fs-btn{position:fixed; left:max(12px, env(safe-area-inset-left,0px)); bottom:calc(10px + env(safe-area-inset-bottom,0px));
+.corner{display:flex; justify-content:space-between; gap:12px; margin-top:16px}
+.fs-btn{margin-right:auto;
   background:rgba(0,0,0,.25); color:#e6eef0; border:0; border-radius:20px; padding:8px 14px; font:600 13px var(--f-body); cursor:pointer}
-.parents{position:fixed; right:max(12px, env(safe-area-inset-right,0px)); bottom:calc(10px + env(safe-area-inset-bottom,0px));
+.parents{margin-left:auto;
   background:rgba(0,0,0,.25); color:#e6eef0; border:0; border-radius:20px; padding:8px 14px; font:600 13px var(--f-body); cursor:pointer}
 canvas#confetti{position:fixed; inset:0; pointer-events:none; z-index:30; width:100%; height:100%}
 .hint-box{background:#fff7c2; border:2px dashed #d3b62a; border-radius:10px; padding:12px; font-size:17px}
 .vh{position:absolute; width:1px; height:1px; opacity:0; overflow:hidden}
 label.btn{display:flex; align-items:center; justify-content:center; text-align:center; box-sizing:border-box; position:relative}
+.zoom,.jig{width:min(100%, 62vh); margin-inline:auto}
 .zoom{overflow:hidden; border-radius:6px; aspect-ratio:1; background:var(--ink); margin-top:12px}
 .zoom img{width:100%; height:100%; object-fit:cover; display:block; transition:transform .5s}
 .jig{display:grid; grid-template-columns:repeat(3,1fr); gap:3px; aspect-ratio:1; background:var(--ink); padding:3px; border-radius:6px; margin-top:12px}
 .jig button{border:0; padding:0; background-size:300% 300%; cursor:pointer; border-radius:2px}
 .jig button.sel{outline:5px solid var(--tape); outline-offset:-5px}
-.full{width:100%; border-radius:6px; display:block; margin-top:12px}
+.full{max-width:100%; max-height:62vh; border-radius:6px; display:block; margin:12px auto 0}
 .slots{display:flex; gap:5px; justify-content:center; margin-top:14px}
 .slot{flex:0 1 40px; min-width:0; height:50px; border-bottom:4px solid var(--ink); display:flex; align-items:flex-end; justify-content:center; font:400 26px var(--f-display); color:var(--stamp)}
 .letters{display:flex; flex-wrap:wrap; gap:10px; justify-content:center}
@@ -131,10 +139,10 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .busy{text-align:center; font-weight:600; padding:16px 0}
 .busy .glass{font-size:48px; display:inline-block; animation:hunt 1.6s ease-in-out infinite}
 @keyframes hunt{0%,100%{transform:translateX(-30px) rotate(-10deg)}50%{transform:translateX(30px) rotate(10deg)}}
-.album{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:14px}
+.album{padding:0 6px; display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:14px}
 .album img{width:100%; background:#fff; padding:6px 6px 24px; box-sizing:border-box; box-shadow:0 4px 10px rgba(0,0,0,.25); transform:rotate(-2deg)}
 .album img:nth-child(even){transform:rotate(2deg)}
-.viewfinder{position:relative; margin-top:12px; border-radius:6px; overflow:hidden; background:#000; aspect-ratio:4/3}
+.viewfinder{position:relative; margin:12px auto 0; width:min(100%, calc(62vh * 4 / 3)); border-radius:6px; overflow:hidden; background:#000; aspect-ratio:4/3}
 .viewfinder video{width:100%; height:100%; object-fit:cover; display:block}
 .viewfinder video.mirror{transform:scaleX(-1)}
 .viewfinder .count{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font:400 120px var(--f-display); color:#fff; text-shadow:0 4px 14px rgba(0,0,0,.6); pointer-events:none}
@@ -291,7 +299,8 @@ async function api(path, opts={}){
   const headers = { Authorization:`Bearer ${aiKey()}`, ...(opts.json ? { "Content-Type":"application/json" } : {}) };
   let r;
   try{ r = await fetch(apiUrl(path), { method: opts.method || (opts.body||opts.json ? "POST" : "GET"), headers, body: opts.json ? JSON.stringify(opts.json) : opts.body }); }
-  catch(e){ throw new Error("Geen verbinding met de server (of de server staat geen apps in de browser toe)."); }
+  catch(e){ const host = (()=>{ try{ return new URL(apiUrl(path)).host; }catch(_){ return ai.base; } })();
+    throw new Error(`${host} gaf geen antwoord. Is er internet? Zo ja, dan staat ${host} waarschijnlijk geen verzoeken vanaf een webpagina toe (CORS).`); }
   if (opts.raw && r.ok) return r;
   const j = await r.json().catch(()=>({}));
   if (!r.ok) throw Object.assign(new Error(j.error?.message || j.message || j.detail?.[0]?.msg || (typeof j.detail==="string" && j.detail) || `HTTP ${r.status}`), { status:r.status });
@@ -319,16 +328,28 @@ async function aiDetective(id){
     else if (b64) out = b64ToBlob(b64.inline_data?.data || b64.b64_json);
   } else if (ai.style === "mistral"){
     // Mistral can't edit a photo: the agent looks at it and draws a new picture with its image_generation tool.
-    if (!ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base){
-      const a = await api("/agents", { json:{ model:ai.model, name:"Speurtocht tekenaar", description:"Maakt detective-plaatjes van teamfoto's",
-        instructions:"You are an illustrator. Look carefully at the attached photo (number of people, hair, clothes, poses) and ALWAYS use the image generation tool to draw the requested picture of these people.",
-        tools:[{ type:"image_generation" }] } });
-      ai.agent = { id:a.id, model:ai.model, base:ai.base }; save(KEY_AI, ai);
+    const agent = async fresh => {
+      if (fresh || !ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base || ai.agent.key!==aiKey().slice(-6)){
+        const a = await api("/agents", { json:{ model:ai.model, name:"Speurtocht tekenaar", description:"Maakt detective-plaatjes van teamfoto's",
+          instructions:"You are an illustrator. Look carefully at the attached photo (number of people, hair, clothes, poses) and ALWAYS use the image generation tool to draw the requested picture of these people.",
+          tools:[{ type:"image_generation" }] } });
+        ai.agent = { id:a.id, model:ai.model, base:ai.base, key:aiKey().slice(-6) }; save(KEY_AI, ai);
+      }
+      return ai.agent.id;
+    };
+    const photo = await blobToDataUrl(blob);
+    const ask = async (id, withPhoto) => api("/conversations", { json:{ agent_id:id, stream:false, inputs:[{ role:"user", content:
+      withPhoto ? [{ type:"text", text:prompt }, { type:"image_url", image_url:photo }] : prompt }] } });
+    let j;
+    try{ j = await ask(await agent(false), true); }
+    catch(e){
+      if (e.status===404) j = await ask(await agent(true), true);          // agent was deleted or belongs to another key
+      else if (e.status===400 || e.status===422) j = await ask(await agent(false), false); // model can't take the photo: draw from the prompt only
+      else throw e;
     }
-    const j = await api("/conversations", { json:{ agent_id:ai.agent.id, stream:false, inputs:[{ role:"user", content:[
-      { type:"text", text:prompt }, { type:"image_url", image_url: await blobToDataUrl(blob) } ] }] } });
     const file = (j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[]).find(c=>c.type==="tool_file" && c.file_id);
     if (file) out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob();
+    else throw new Error(((j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[{text:o.content}]).map(c=>c.text||"").join(" ").trim().slice(0,120)) || "Mistral maakte geen plaatje");
   } else {
     const send = extra => {
       const f = new FormData();
@@ -452,7 +473,11 @@ document.addEventListener("pointerdown", keepAwake, true);
 keepAwake();
 
 /* ---------- screens ---------- */
-function folder(tab, inner){ return `<div class="folder"><span class="tab-label">${esc(tab)}</span><div class="stack">${inner}</div></div>`; }
+function folder(tab, inner){
+  const [a, ...rest] = tab.split(" · ");
+  const label = `<span class="tl-a">${esc(a)}</span>${rest.length ? `<span class="tl-b">&nbsp;· ${esc(rest.join(" · "))}</span>` : ""}`;
+  return `<div class="folder"><span class="tab-label" title="${esc(tab)}">${label}</span><div class="stack">${inner}</div></div>`;
+}
 
 // Photo steps without a photo on this device (e.g. after importing settings) fall back to a plain riddle + code.
 const kind = s => { const t = s.type||"code"; return (t==="photo"||t==="jigsaw") && !imgs.has(s.photo) ? "code" : t; };
@@ -545,10 +570,14 @@ function renderClue(){
     else if (!shown) after = camBtn("📷 Maak de foto", "") + `<p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>`;
     else {
       extra = `<img class="full" src="${imgs.get(shown)}" alt="Jullie foto">`;
-      after = `${s.ai && !sub.styled ? `<button class="btn" data-act="detectify">✨ Maak er detectives van!</button>` : ""}
+      const offer = s.ai && !sub.styled;
+      after = `${offer && ui.aiError ? `<div class="hint-box"><b>De AI-tekenaar lukte niet.</b><br>${esc(ui.aiError)}</div>
+          <div class="row"><button class="btn" data-act="detectify">Opnieuw tekenen</button><button class="btn alt" data-act="detectLocal">Maak een dossierfoto</button></div>`
+        : offer ? `<button class="btn" data-act="detectify">✨ Maak er detectives van!</button>
+          <p class="muted" style="font-size:14px;text-align:center">${aiReady() ? `Getekend door ${esc(PROVIDERS[ai.provider]?.name || "AI")} (${esc(ai.model)})` : "Zonder AI: er is geen sleutel ingesteld bij Ouders"}</p>` : ""}
         <button class="btn ${s.ai && !sub.styled ? "alt" : ""}" data-act="usePhoto">${sub.styled ? "Super! Stop hem in het dossier" : "Deze foto is goed"}</button>
         ${sub.styled ? `<button class="btn ghost" data-act="unstyle">Toch de gewone foto</button>` : ""}
-        <button class="btn alt small" data-act="retake">Nog een keer</button>
+        <button class="btn alt small" data-act="retake">Nieuwe foto maken</button>
         <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>`;
     }
   }
@@ -698,7 +727,7 @@ function renderSetup(){
       ${ai.models.length ? `<button class="btn alt small" data-act="typeModel">Zelf een model typen</button>` : ""}
     </div>
     <p class="muted" style="font-size:14px">🖼 = maakt plaatjes${ai.style==="mistral" ? " (voor Mistral kies je juist een gewoon chatmodel, bijv. mistral-medium-latest)" : ""}.</p>
-    <p class="msg" id="aiMsg" aria-live="polite"></p>
+    <p class="msg" id="aiMsg" aria-live="polite">${esc(aiStatus())}</p>
     <div><label class="lbl" for="ai-prompt">Opdracht aan de AI</label><textarea id="ai-prompt" style="min-height:120px">${esc(ai.prompt)}</textarea></div>
     <button class="btn" data-act="saveSetup">Opslaan</button>
     <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
@@ -728,8 +757,7 @@ function render(){
   else if (prog.phase==="accuse") html = renderAccuse();
   else if (prog.phase==="solved") html = renderSolved();
   else html = renderStart();
-  if (!ui.view) html += `<button class="parents" data-act="openSetup">Ouders</button>`
-    + (canFs ? `<button class="fs-btn" data-act="fullscreen">${fsLabel()}</button>` : "");
+  if (!ui.view) html += `<div class="corner">${canFs ? `<button class="fs-btn" data-act="fullscreen">${fsLabel()}</button>` : ""}<button class="parents" data-act="openSetup">Ouders</button></div>`;
   if (ui.overlay) html += ui.overlay;
   app.innerHTML = html;
   camAttach();
@@ -758,6 +786,9 @@ function collectAi(){
   ai.model = document.getElementById("ai-model").value.trim();
   ai.prompt = document.getElementById("ai-prompt").value.trim() || AI_DEFAULT.prompt;
 }
+const aiReady = () => !!(aiKey() && ai.base && ai.model);
+const aiStatus = () => aiReady() ? `✓ Ingesteld: ${PROVIDERS[ai.provider]?.name || ai.base} · ${ai.model}. Wordt meteen bewaard.`
+  : "Nog geen sleutel: “Maak er detectives van” bewerkt de foto op het apparaat zelf.";
 const aiMsg = t => { const m=document.getElementById("aiMsg"); if(m) m.textContent=t; };
 
 function stepProblem(s){
@@ -823,24 +854,21 @@ app.addEventListener("click", async e=>{
       }
       saveProg(); render(); break; }
     case "unletter": sub.picked=(sub.picked||[]).slice(0,-1); saveProg(); render(); break;
-    case "detectify": {
-      const useAi = !!aiKey() && !!ai.base && !!ai.model;
-      ui.busy = useAi ? "De tekenaar van het detectivebureau is aan het werk… dit duurt ongeveer een minuut." : "Even ontwikkelen…";
+    case "detectify": case "detectLocal": {
+      const useAi = act==="detectify" && aiReady(); ui.aiError="";
+      ui.busy = useAi ? `De tekenaar van het detectivebureau (${PROVIDERS[ai.provider]?.name || "AI"}) is aan het werk… dit duurt ongeveer een minuut.` : "Even ontwikkelen…";
       render();
       try{ sub.styled = useAi ? await aiDetective(sub.photo) : await localDetective(sub.photo); }
-      catch(err){
-        try{ sub.styled = await localDetective(sub.photo); ui.msg = "De AI-tekenaar lukte niet, dus we maken er een dossierfoto van."; console.warn(err); }
-        catch(err2){ ui.msg = "Dat lukte niet. Gebruik gewoon de gewone foto!"; }
-      }
+      catch(err){ console.warn(err); if(useAi) ui.aiError = err.message || String(err); else ui.msg = "Dat lukte niet. Gebruik gewoon de gewone foto!"; }
       ui.busy=""; saveProg(); render(); break; }
     case "snap": case "timer": camSnap(act==="timer"); break;
     case "flip": cam.facing = cam.facing==="user" ? "environment" : "user"; camStop(); render(); break;
-    case "retake": dropImage(sub.photo); dropImage(sub.styled); prog.sub={}; saveProg(); render(); break;
+    case "retake": ui.aiError=""; dropImage(sub.photo); dropImage(sub.styled); prog.sub={}; saveProg(); render(); break;
     case "unstyle": dropImage(sub.styled); delete sub.styled; saveProg(); render(); break;
     case "usePhoto":
       prog.photos.push({ id: sub.styled||sub.photo, orig: sub.photo }); prog.sub={}; saveProg(); solveStep(); break;
     case "next":
-      ui.overlay=null; ui.hintShown=false; ui.zoom=0; prog.sub={};
+      ui.overlay=null; ui.hintShown=false; ui.zoom=0; ui.aiError=""; prog.sub={};
       prog.index++; prog.phase = prog.index>=cfg.steps.length ? "accuse" : "clue";
       saveProg(); render(); scrollTo(0,0); break;
     case "accuse": {
@@ -901,13 +929,14 @@ app.addEventListener("click", async e=>{
 
 app.addEventListener("change", async e=>{
   const t=e.target;
-  if(t.matches('select[data-f="type"]') || t.id==="ai-style"){ collectSetup(); render(); return; }
+  if(t.matches('select[data-f="type"]') || t.id==="ai-style"){ collectSetup(); if(t.id==="ai-style") save(KEY_AI, ai); render(); return; }
+  if(t.id==="ai-model"){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); return; }
   if(t.id==="lock-mode"){ collectSetup(); ui.lockDraft=t.value; render(); document.getElementById("lock-mode")?.scrollIntoView({block:"center"}); return; }
   if(t.id==="ai-provider"){
     collectSetup(); const p = PROVIDERS[t.value];
     ai.provider = t.value; ai.models = [];
     if (t.value!=="custom"){ ai.base = p.base; ai.style = p.style; ai.model = p.model; }
-    render(); return;
+    save(KEY_AI, ai); render(); return;
   }
   if(t.dataset.photo!==undefined && t.files[0]){
     collectSetup(); setupMsg("Foto wordt verwerkt…");
@@ -948,7 +977,10 @@ app.addEventListener("submit", e=>{
   })();
 });
 
-app.addEventListener("input", e=>{ if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); } });
+app.addEventListener("input", e=>{
+  if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); }
+  if(/^ai-(key|base|model|prompt)$/.test(e.target.id)){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); }
+});
 
 window.claude?.hot?.snapshot?.(()=>({ ui:{} })); // never restore an unlocked menu
 function start(data){
