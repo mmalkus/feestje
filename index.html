@@ -199,7 +199,7 @@ const AI_DEFAULT = {
 };
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 12;
+const VERSION = 13;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -519,7 +519,7 @@ const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenEle
 const fsLabel = () => isFs() ? "Klein scherm" : "⛶ Volledig scherm";
 function goFull(){ try{ (root.requestFullscreen||root.webkitRequestFullscreen).call(root)?.catch?.(()=>{}); }catch(e){} }
 function exitFull(){ try{ (document.exitFullscreen||document.webkitExitFullscreen).call(document)?.catch?.(()=>{}); }catch(e){} }
-["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev, ()=>{ const b=document.querySelector(".fs-btn"); if(b) b.textContent=fsLabel(); }));
+["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev, ()=>{ document.querySelectorAll("[data-act=fullscreen]").forEach(b=>b.textContent=fsLabel()); }));
 
 /* ---------- wake lock ---------- */
 // The lock is dropped whenever the page is hidden, so it's re-requested on return and on any tap (some browsers need one).
@@ -753,6 +753,9 @@ function stepEditor(s, i){
 function renderSetup(){
   const notes = cfg.steps.map((s,i)=>NOTE_TYPES.includes(s.type||"code") ? `<div><span>${i+1}. ${esc(s.place)}</span><b>${esc(norm(s.code))}</b></div>` : "").join("");
   return folder("INSTELLINGEN · OUDERS", `
+    ${canFs ? `<button class="btn alt small" data-act="fullscreen">${fsLabel()}</button>`
+      : (window.navigator.standalone || matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches) ? ""
+      : `<p class="muted" style="font-size:15px">Volledig scherm: open het spel in Safari, tik op Deel → <b>Zet op beginscherm</b> en start het vanaf daar.</p>`}
     <h2>Speurtocht instellen</h2>
     <p class="muted" style="font-size:16px">Alles wordt bewaard op dít apparaat. Stel het dus in op de telefoon of tablet waarmee de kinderen spelen.</p>
     <div><label class="lbl" for="s-title">Titel</label><input type="text" id="s-title" value="${esc(cfg.title)}"></div>
