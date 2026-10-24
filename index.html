@@ -5,6 +5,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
 <title>Dossier Verdwenen Taart</title>
 <meta name="theme-color" content="#1f4047">
@@ -106,10 +108,34 @@ label.lbl{font-size:14px; font-weight:600; color:var(--ink-soft); display:block;
 .notes-list{font-family:var(--f-type); font-size:18px; display:flex; flex-direction:column; gap:8px}
 .notes-list div{background:var(--paper); padding:10px 12px; border-radius:4px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap}
 .notes-list b{letter-spacing:.15em; color:var(--stamp)}
+.fs-btn{position:fixed; left:max(12px, env(safe-area-inset-left,0px)); bottom:calc(10px + env(safe-area-inset-bottom,0px));
+  background:rgba(0,0,0,.25); color:#e6eef0; border:0; border-radius:20px; padding:8px 14px; font:600 13px var(--f-body); cursor:pointer}
 .parents{position:fixed; right:max(12px, env(safe-area-inset-right,0px)); bottom:calc(10px + env(safe-area-inset-bottom,0px));
   background:rgba(0,0,0,.25); color:#e6eef0; border:0; border-radius:20px; padding:8px 14px; font:600 13px var(--f-body); cursor:pointer}
 canvas#confetti{position:fixed; inset:0; pointer-events:none; z-index:30; width:100%; height:100%}
 .hint-box{background:#fff7c2; border:2px dashed #d3b62a; border-radius:10px; padding:12px; font-size:17px}
+.vh{position:absolute; width:1px; height:1px; opacity:0; overflow:hidden}
+label.btn{display:flex; align-items:center; justify-content:center; text-align:center; box-sizing:border-box; position:relative}
+.zoom{overflow:hidden; border-radius:6px; aspect-ratio:1; background:var(--ink); margin-top:12px}
+.zoom img{width:100%; height:100%; object-fit:cover; display:block; transition:transform .5s}
+.jig{display:grid; grid-template-columns:repeat(3,1fr); gap:3px; aspect-ratio:1; background:var(--ink); padding:3px; border-radius:6px; margin-top:12px}
+.jig button{border:0; padding:0; background-size:300% 300%; cursor:pointer; border-radius:2px}
+.jig button.sel{outline:5px solid var(--tape); outline-offset:-5px}
+.full{width:100%; border-radius:6px; display:block; margin-top:12px}
+.slots{display:flex; gap:5px; justify-content:center; margin-top:14px}
+.slot{flex:0 1 40px; min-width:0; height:50px; border-bottom:4px solid var(--ink); display:flex; align-items:flex-end; justify-content:center; font:400 26px var(--f-display); color:var(--stamp)}
+.letters{display:flex; flex-wrap:wrap; gap:10px; justify-content:center}
+.tile{width:54px; height:58px; font:400 26px var(--f-display); background:var(--tape); color:var(--ink); border:0; border-radius:10px; box-shadow:0 4px 0 #b39a1f; cursor:pointer}
+.tile:disabled{opacity:.2; box-shadow:none}
+.thumb{width:96px; height:96px; object-fit:cover; border-radius:6px; flex:none!important}
+.busy{text-align:center; font-weight:600; padding:16px 0}
+.busy .glass{font-size:48px; display:inline-block; animation:hunt 1.6s ease-in-out infinite}
+@keyframes hunt{0%,100%{transform:translateX(-30px) rotate(-10deg)}50%{transform:translateX(30px) rotate(10deg)}}
+.album{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:14px}
+.album img{width:100%; background:#fff; padding:6px 6px 24px; box-sizing:border-box; box-shadow:0 4px 10px rgba(0,0,0,.25); transform:rotate(-2deg)}
+.album img:nth-child(even){transform:rotate(2deg)}
+.check{display:flex; gap:10px; align-items:center; font-size:16px}
+.check input{width:24px; height:24px}
 @media (prefers-reduced-motion: reduce){ *{animation:none!important; transition:none!important} }
 </style>
 
@@ -119,6 +145,11 @@ canvas#confetti{position:fixed; inset:0; pointer-events:none; z-index:30; width:
 
 <script>
 (function(){
+/* Step types: code = riddle + note with code; photo = "waar is dit?" zoomed photo + note; jigsaw = swap-tile photo puzzle + note;
+   scramble = letter puzzle on the tablet; camera = photo assignment, optionally turned into a detective picture. */
+const TYPES = { code:"Raadsel + briefje", photo:"Waar is dit? (foto)", jigsaw:"Fotopuzzel", scramble:"Letterpuzzel", camera:"Foto-opdracht" };
+const NOTE_TYPES = ["code","photo","jigsaw"];
+
 const DEFAULT = {
   title: "De Verdwenen Verjaardagstaart",
   story: "Vanochtend stond er een prachtige verjaardagstaart in de keuken. En nu… is hij WEG! Iemand heeft hem gestolen. Jullie zijn de beste detectives van het hele huis. Volg de aanwijzingen, vind de geheime codes en ontmasker de dader!",
@@ -126,27 +157,188 @@ const DEFAULT = {
   suspects: ["Papa", "Mama", "De kat", "Een stoute kabouter"],
   finalHide: "In de oven (die staat UIT!) 🎂",
   steps: [
-    { clue: "Binnen ben ik koud,\nmaar ik zorg goed voor jullie kaas en melk.\nKijk eens in mijn deur!", place: "Koelkastdeur", code: "SPOOR", hint: "Het staat in de keuken en het zoemt.", evidence: "Er zit slagroom op de deurklink van de keuken. De dader had dus grote handen…" },
-    { clue: "Ik heb vier poten, maar ik loop nooit.\nAls het eten klaar is, zit iedereen bij mij.\nKruip eens onder mij!", place: "Onder de eettafel", code: "LOEP", hint: "Hier eten jullie elke avond aan.", evidence: "Onder de tafel ligt een schoenafdruk. Maat 44! Dat is een hele grote voet." },
-    { clue: "Ik zit vol met verhalen,\nmaar praten kan ik niet.\nZoek tussen mijn bladzijden!", place: "Boekenkast", code: "VINGER", hint: "Je leest ze voor het slapengaan.", evidence: "In een boek zit een briefje: ‘Niet vergeten: taart verstoppen!’ Het handschrift is erg slordig." },
-    { clue: "Overdag sta ik bij de deur te wachten.\nIk ruik een beetje naar voeten.\nWie zoekt, die vindt!", place: "Schoenenrek", code: "SLEUTEL", hint: "Hier zet je je schoenen neer als je thuiskomt.", evidence: "In een grote schoen zitten taartkruimels. Chocola!" },
-    { clue: "Ik heb kussens, maar ik slaap nooit.\nWie op mij zit, kijkt vaak tv.\nVoel eens tussen mijn kussens!", place: "Tussen de kussens van de bank", code: "GEHEIM", hint: "Het is het zachtste meubel in de woonkamer.", evidence: "Tussen de kussens ligt een stropdas met een vlek van slagroom." },
-    { clue: "Ik draai en draai en draai,\nmaar ik word nooit duizelig.\nIk maak jullie kleren weer schoon!", place: "Bij de wasmachine", code: "TAART", hint: "Kijk waar de vuile was naartoe gaat.", evidence: "Op de wasmachine ligt een bril met chocola op het glas. Wie draagt er een bril én een stropdas?" }
+    { type: "camera", ai: true, clue: "Elk detectivebureau heeft een teamfoto nodig! Ga allemaal bij elkaar staan en trek jullie slimste speurneus-gezicht.", evidence: "" },
+    { type: "code", clue: "Binnen ben ik koud,\nmaar ik zorg goed voor jullie kaas en melk.\nKijk eens in mijn deur!", place: "Koelkastdeur", code: "SPOOR", hint: "Het staat in de keuken en het zoemt.", evidence: "Er zit slagroom op de deurklink van de keuken. De dader had dus grote handen…" },
+    { type: "code", clue: "Ik heb vier poten, maar ik loop nooit.\nAls het eten klaar is, zit iedereen bij mij.\nKruip eens onder mij!", place: "Onder de eettafel", code: "LOEP", hint: "Hier eten jullie elke avond aan.", evidence: "Onder de tafel ligt een schoenafdruk. Maat 44! Dat is een hele grote voet." },
+    { type: "scramble", clue: "De dader heeft een woord door elkaar gehusseld! Tik de letters in de goede volgorde.", code: "KRUIMEL", hint: "Wat valt er op de grond als je taart eet?", evidence: "KRUIMEL! Er loopt een spoor van taartkruimels door de gang…" },
+    { type: "code", clue: "Ik zit vol met verhalen,\nmaar praten kan ik niet.\nZoek tussen mijn bladzijden!", place: "Boekenkast", code: "VINGER", hint: "Je leest ze voor het slapengaan.", evidence: "In een boek zit een briefje: ‘Niet vergeten: taart verstoppen!’ Het handschrift is erg slordig." },
+    { type: "code", clue: "Overdag sta ik bij de deur te wachten.\nIk ruik een beetje naar voeten.\nWie zoekt, die vindt!", place: "Schoenenrek", code: "SLEUTEL", hint: "Hier zet je je schoenen neer als je thuiskomt.", evidence: "In een grote schoen zitten taartkruimels. Chocola!" },
+    { type: "code", clue: "Ik heb kussens, maar ik slaap nooit.\nWie op mij zit, kijkt vaak tv.\nVoel eens tussen mijn kussens!", place: "Tussen de kussens van de bank", code: "GEHEIM", hint: "Het is het zachtste meubel in de woonkamer.", evidence: "Tussen de kussens ligt een stropdas met een vlek van slagroom." },
+    { type: "code", clue: "Ik draai en draai en draai,\nmaar ik word nooit duizelig.\nIk maak jullie kleren weer schoon!", place: "Bij de wasmachine", code: "TAART", hint: "Kijk waar de vuile was naartoe gaat.", evidence: "Op de wasmachine ligt een bril met chocola op het glas. Wie draagt er een bril én een stropdas?" }
   ]
 };
+/* Image providers. style: "edits" = OpenAI-style /images/edits (photo in, edited photo out);
+   "chat" = /chat/completions with image output (OpenRouter, Gemini image models);
+   "mistral" = Mistral agent with the image_generation tool (draws a new picture from a description of the photo). */
+const PROVIDERS = {
+  openai:     { name:"OpenAI",     base:"https://api.openai.com/v1",    style:"edits",   model:"gpt-image-1" },
+  openrouter: { name:"OpenRouter", base:"https://openrouter.ai/api/v1", style:"chat",    model:"google/gemini-2.5-flash-image" },
+  mistral:    { name:"Mistral",    base:"https://api.mistral.ai/v1",    style:"mistral", model:"mistral-medium-latest" },
+  custom:     { name:"Anders (zelf invullen)", base:"", style:"edits", model:"" }
+};
+const STYLES = { edits:"Foto bewerken (/images/edits)", chat:"Chat met plaatje terug (/chat/completions)", mistral:"Mistral agent (image_generation)" };
+const AI_DEFAULT = {
+  provider: "openai", keys: {}, base: PROVIDERS.openai.base, style: "edits", model: "gpt-image-1", models: [],
+  prompt: "Turn this photo into a bright, friendly children's picture-book illustration in which everyone is a detective: deerstalker hats, magnifying glasses, little trench coats, a playful mystery atmosphere with a birthday cake hidden somewhere. Keep exactly the same people, their faces, hair, poses and the number of people. Cheerful, warm, kid-friendly, no text."
+};
 
-const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1";
+const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
 
 let cfg = load(KEY_CFG, null) || structuredClone(DEFAULT);
 let prog = load(KEY_PROG, null) || { team:"", index:0, phase:"start", wrongSuspects:[] };
-let ui = { hintShown:false, overlay:null, setupUnlocked:false, gateQ:null, msg:"" };
+prog.sub = prog.sub || {}; prog.photos = prog.photos || [];
+let ai = Object.assign({}, AI_DEFAULT, load(KEY_AI, {}));
+if (ai.key){ ai.keys = { ...ai.keys, openai: ai.keys.openai || ai.key }; delete ai.key; } // settings from the first version
+const aiKey = () => (ai.keys[ai.provider] || "").trim();
+let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0 };
+
+/* ---------- parents' lock: a sum or a PIN; asked every time the menu opens ---------- */
+const KEY_LOCK = "speurtocht.lock.v1";
+let lock = load(KEY_LOCK, { mode:"math" }); // { mode:"math"|"pin", salt, hash }
+async function hashPin(pin, salt){
+  const data = `${salt}:${pin}`;
+  if (crypto.subtle){ const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data)); return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join(""); }
+  let h = 0; for (const c of data) h = (h*31 + c.charCodeAt(0)) | 0; return "w" + h; // plain http on a LAN: no WebCrypto
+}
+// Two-digit × two-digit (e.g. 12 × 45): fine for a parent, too hard for the kids. Also the PIN recovery question.
+const hardSum = () => { const r = () => 11 + (Math.random()*89|0); let a, b; do { a = r(); b = r(); } while (a%10===0 || b%10===0); return { a, b }; };
 
 const app = document.getElementById("app");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const norm = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]/gi,"").toUpperCase();
 const saveProg = () => save(KEY_PROG, prog);
+const shuffle = a => { a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [a[i],a[j]]=[a[j],a[i]]; } return a; };
+const scrambled = (a, same) => { let r=a; for(let t=0;t<30;t++){ r=shuffle(a); if(!same(r)) break; } return r; };
+
+/* ---------- photos (IndexedDB; blobs are too big for localStorage) ---------- */
+const imgs = new Map(); // id -> object URL
+const DB = (()=>{
+  let p;
+  const open = () => p || (p = new Promise((res,rej)=>{ const r=indexedDB.open("speurtocht",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("img"); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }));
+  const run = (mode, fn) => open().then(db=>new Promise((res,rej)=>{ const t=db.transaction("img",mode); fn(t.objectStore("img")); t.oncomplete=res; t.onerror=()=>rej(t.error); }));
+  return {
+    put:(k,v)=>run("readwrite", s=>s.put(v,k)),
+    del:k=>run("readwrite", s=>s.delete(k)),
+    all:()=>open().then(db=>new Promise((res,rej)=>{ const out=new Map(), c=db.transaction("img").objectStore("img").openCursor();
+      c.onsuccess=()=>{ const cur=c.result; if(cur){ out.set(cur.key,cur.value); cur.continue(); } else res(out); }; c.onerror=()=>rej(c.error); }))
+  };
+})();
+const loadImg = src => new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; });
+const toBlob = c => new Promise(r=>c.toBlob(r,"image/jpeg",.85));
+
+async function keepBlob(blob, prefix){
+  const id = prefix + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  try{ await DB.put(id, blob); }catch(e){} // private mode: keep it in memory only
+  imgs.set(id, URL.createObjectURL(blob)); return id;
+}
+async function storeImage(file, prefix, square){
+  const url = URL.createObjectURL(file);
+  try{
+    const im = await loadImg(url);
+    let sx=0, sy=0, sw=im.naturalWidth, sh=im.naturalHeight;
+    if(square){ const m=Math.min(sw,sh); sx=(sw-m)/2; sy=(sh-m)/2; sw=sh=m; }
+    const sc = Math.min(1, 1024/Math.max(sw,sh)), c=document.createElement("canvas");
+    c.width=Math.round(sw*sc); c.height=Math.round(sh*sc);
+    c.getContext("2d").drawImage(im, sx,sy,sw,sh, 0,0,c.width,c.height);
+    return keepBlob(await toBlob(c), prefix);
+  } finally { URL.revokeObjectURL(url); }
+}
+function dropImage(id){ if(!id) return; DB.del(id).catch(()=>{}); const u=imgs.get(id); if(u) URL.revokeObjectURL(u); imgs.delete(id); }
+function gcImages(){
+  const keep = new Set([...cfg.steps.map(s=>s.photo), ...prog.photos.flatMap(p=>[p.id,p.orig]), prog.sub.photo, prog.sub.styled]);
+  [...imgs.keys()].forEach(k=>{ if(!keep.has(k)) dropImage(k); });
+}
+
+/* ---------- detective version of a photo ---------- */
+// Offline fallback: sepia "case file" print with a stamp, made on the device.
+async function localDetective(id){
+  const im = await loadImg(imgs.get(id));
+  const pad=40, W=im.naturalWidth+pad*2, H=im.naturalHeight+pad*2+110, c=document.createElement("canvas"); c.width=W; c.height=H;
+  const x=c.getContext("2d");
+  x.fillStyle="#fdf8ea"; x.fillRect(0,0,W,H);
+  x.drawImage(im, pad, pad);
+  const d=x.getImageData(pad,pad,im.naturalWidth,im.naturalHeight), p=d.data;
+  for(let i=0;i<p.length;i+=4){ const r=p[i],g=p[i+1],b=p[i+2];
+    p[i]=Math.min(255,r*.42+g*.77+b*.19); p[i+1]=Math.min(255,r*.35+g*.69+b*.17); p[i+2]=Math.min(255,r*.27+g*.53+b*.13); }
+  x.putImageData(d,pad,pad);
+  const v=x.createRadialGradient(W/2,pad+im.naturalHeight/2,im.naturalWidth*.3,W/2,pad+im.naturalHeight/2,im.naturalWidth*.75);
+  v.addColorStop(0,"rgba(0,0,0,0)"); v.addColorStop(1,"rgba(40,20,0,.45)"); x.fillStyle=v; x.fillRect(pad,pad,im.naturalWidth,im.naturalHeight);
+  x.fillStyle="#2b2420"; x.font=`${Math.round(W/22)}px "Special Elite", "Courier New", monospace`; x.textBaseline="middle";
+  x.fillText(`DETECTIVEBUREAU ${(prog.team||"").toUpperCase()}`.trim(), pad, H-62, W-pad*2-W/6);
+  x.font=`${Math.round(W/9)}px serif`; x.fillText("🔍", W-pad-W/8, H-70);
+  x.save(); x.translate(W*.72, pad+im.naturalHeight*.14); x.rotate(-.18);
+  x.strokeStyle=x.fillStyle="rgba(196,47,40,.85)"; x.lineWidth=W/120; const fs=Math.round(W/16);
+  x.font=`${fs}px Bungee, "Arial Black", Impact, sans-serif`; x.textAlign="center";
+  const tw=x.measureText("TOPDETECTIVES").width; x.strokeRect(-tw/2-fs*.4,-fs*.8,tw+fs*.8,fs*1.6); x.fillText("TOPDETECTIVES",0,0);
+  x.restore();
+  return keepBlob(await toBlob(c), "k-");
+}
+// Optional: an image API with the parent's own key (stored only on this device).
+const blobToDataUrl = blob => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); });
+const b64ToBlob = (b64, type="image/png") => { const bin=atob(b64), u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return new Blob([u8],{type}); };
+const apiUrl = path => ai.base.trim().replace(/\/+$/,"") + path;
+async function api(path, opts={}){
+  const headers = { Authorization:`Bearer ${aiKey()}`, ...(opts.json ? { "Content-Type":"application/json" } : {}) };
+  let r;
+  try{ r = await fetch(apiUrl(path), { method: opts.method || (opts.body||opts.json ? "POST" : "GET"), headers, body: opts.json ? JSON.stringify(opts.json) : opts.body }); }
+  catch(e){ throw new Error("Geen verbinding met de server (of de server staat geen apps in de browser toe)."); }
+  if (opts.raw && r.ok) return r;
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw Object.assign(new Error(j.error?.message || j.message || j.detail?.[0]?.msg || (typeof j.detail==="string" && j.detail) || `HTTP ${r.status}`), { status:r.status });
+  return j;
+}
+async function fetchModels(){
+  const j = await api("/models"), list = Array.isArray(j) ? j : (j.data || j.models || []);
+  const isImg = m => (m.architecture?.output_modalities||[]).includes("image") || /image|dall-e|flux|imagen|stable-diffusion|sdxl/i.test(m.id);
+  return list.filter(m=>m && m.id).map(m=>({ id:m.id, img:isImg(m) }))
+    .sort((a,b)=> (b.img-a.img) || a.id.localeCompare(b.id));
+}
+async function aiDetective(id){
+  const blob = await (await fetch(imgs.get(id))).blob(), prompt = ai.prompt || AI_DEFAULT.prompt;
+  const toImage = async url => (await fetch(url)).blob();
+  let out;
+  if (ai.style === "chat"){
+    const j = await api("/chat/completions", { json:{ model:ai.model, modalities:["image","text"], messages:[{ role:"user", content:[
+      { type:"text", text:prompt }, { type:"image_url", image_url:{ url: await blobToDataUrl(blob) } } ] }] } });
+    const msg = j.choices?.[0]?.message || {};
+    const parts = Array.isArray(msg.content) ? msg.content : [];
+    const url = msg.images?.[0]?.image_url?.url || parts.find(c=>c.type==="image_url")?.image_url?.url
+      || (typeof msg.content==="string" && msg.content.match(/data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+/)?.[0]);
+    const b64 = parts.find(c=>c.inline_data||c.b64_json); // other providers' variants
+    if (url) out = await toImage(url);
+    else if (b64) out = b64ToBlob(b64.inline_data?.data || b64.b64_json);
+  } else if (ai.style === "mistral"){
+    // Mistral can't edit a photo: the agent looks at it and draws a new picture with its image_generation tool.
+    if (!ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base){
+      const a = await api("/agents", { json:{ model:ai.model, name:"Speurtocht tekenaar", description:"Maakt detective-plaatjes van teamfoto's",
+        instructions:"You are an illustrator. Look carefully at the attached photo (number of people, hair, clothes, poses) and ALWAYS use the image generation tool to draw the requested picture of these people.",
+        tools:[{ type:"image_generation" }] } });
+      ai.agent = { id:a.id, model:ai.model, base:ai.base }; save(KEY_AI, ai);
+    }
+    const j = await api("/conversations", { json:{ agent_id:ai.agent.id, stream:false, inputs:[{ role:"user", content:[
+      { type:"text", text:prompt }, { type:"image_url", image_url: await blobToDataUrl(blob) } ] }] } });
+    const file = (j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[]).find(c=>c.type==="tool_file" && c.file_id);
+    if (file) out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob();
+  } else {
+    const send = extra => {
+      const f = new FormData();
+      f.append("model", ai.model); f.append("prompt", prompt); f.append("image", blob, "foto.jpg");
+      if (/gpt-image/.test(ai.model)){ f.append("size","auto"); f.append("quality","medium"); }
+      if (extra) f.append("input_fidelity","high");
+      return api("/images/edits", { body:f });
+    };
+    let j;
+    try{ j = await send(/gpt-image/.test(ai.model)); }
+    catch(e){ if(e.status!==400 || !/gpt-image/.test(ai.model)) throw e; j = await send(false); } // older models don't know input_fidelity
+    const d = j.data?.[0] || {};
+    if (d.b64_json) out = b64ToBlob(d.b64_json); else if (d.url) out = await toImage(d.url);
+  }
+  if (!out) throw new Error("Geen plaatje ontvangen");
+  return keepBlob(out, "k-");
+}
 
 /* ---------- sound ---------- */
 let actx;
@@ -176,15 +368,45 @@ function confetti(){
     if(++t<240) requestAnimationFrame(f); else {ctx.clearRect(0,0,W,H); c.hidden=true;}})();
 }
 
+/* ---------- fullscreen ---------- */
+// Requested on the first tap (browsers only allow it from a tap) and re-requested on a later tap if something
+// like the camera picker kicked us out. iPhone Safari has no fullscreen API: there "Zet op beginscherm" is the way.
+const root = document.documentElement;
+const canFs = !!(root.requestFullscreen || root.webkitRequestFullscreen);
+const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const fsLabel = () => isFs() ? "Klein scherm" : "⛶ Volledig scherm";
+function goFull(){ try{ (root.requestFullscreen||root.webkitRequestFullscreen).call(root)?.catch?.(()=>{}); }catch(e){} }
+function exitFull(){ try{ (document.exitFullscreen||document.webkitExitFullscreen).call(document)?.catch?.(()=>{}); }catch(e){} }
+["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev, ()=>{ const b=document.querySelector(".fs-btn"); if(b) b.textContent=fsLabel(); }));
+
 /* ---------- wake lock ---------- */
-async function keepAwake(){ try{ if(navigator.wakeLock) await navigator.wakeLock.request("screen"); }catch(e){} }
+// The lock is dropped whenever the page is hidden, so it's re-requested on return and on any tap (some browsers need one).
+let wakeLock = null;
+async function keepAwake(){
+  if (!navigator.wakeLock || (wakeLock && !wakeLock.released) || document.visibilityState!=="visible") return;
+  try{ wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
+}
+document.addEventListener("visibilitychange", keepAwake);
+document.addEventListener("pointerdown", keepAwake, true);
+keepAwake();
 
 /* ---------- screens ---------- */
 function folder(tab, inner){ return `<div class="folder"><span class="tab-label">${esc(tab)}</span><div class="stack">${inner}</div></div>`; }
 
+// Photo steps without a photo on this device (e.g. after importing settings) fall back to a plain riddle + code.
+const kind = s => { const t = s.type||"code"; return (t==="photo"||t==="jigsaw") && !imgs.has(s.photo) ? "code" : t; };
+const ZOOMS = [3.2, 2.2, 1.5, 1];
+
 function evidenceList(upto){
-  const items = cfg.steps.slice(0, upto).map((s,i)=>`<li><span class="nr">#${i+1}</span><span>${esc(s.evidence)}</span></li>`).join("");
+  const items = cfg.steps.slice(0, upto).map((s,i)=>s.evidence ? `<li><span class="nr">#${i+1}</span><span>${esc(s.evidence)}</span></li>` : "").join("");
   return items ? `<div class="stack" style="gap:10px"><p class="type muted">BEWIJSSTUKKEN</p><ul class="evidence">${items}</ul></div>` : "";
+}
+
+function album(){
+  const ps = prog.photos.filter(p=>imgs.has(p.id));
+  return ps.length ? `<div class="stack" style="gap:10px"><p class="type muted">FOTOBEWIJS</p>
+    <div class="album">${ps.map(p=>`<img src="${imgs.get(p.id)}" alt="Foto van het team">`).join("")}</div>
+    <p class="muted" style="font-size:14px">Houd een foto ingedrukt om hem te bewaren.</p></div>` : "";
 }
 
 function renderStart(){
@@ -200,27 +422,77 @@ function renderStart(){
     ${resume ? `<button class="btn" data-act="resume">Verder met het onderzoek</button>
       <button class="btn alt" data-act="restart">Opnieuw beginnen</button>`
       : `<button class="btn" data-act="begin">Start het onderzoek</button>`}
-    <p class="muted" style="font-size:15px">${cfg.steps.length} aanwijzingen · bij elke plek ligt een briefje met een geheime code</p>
+    <p class="muted" style="font-size:15px">${cfg.steps.length} opdrachten · raadsels, puzzels, foto's en geheime codes</p>
   `);
 }
 
+const codeForm = () => `
+  <form id="codeForm" class="stack" style="gap:10px" autocomplete="off">
+    <label class="lbl" for="code">Gevonden? Typ de geheime code van het briefje:</label>
+    <input type="text" id="code" class="code-input" autocapitalize="characters" spellcheck="false" placeholder="CODE">
+    <button class="btn" type="submit">Controleer code</button>
+    <p class="msg bad" id="msg" aria-live="polite">${esc(ui.msg)}</p>
+  </form>`;
+
 function renderClue(){
-  const i = prog.index, s = cfg.steps[i], n = cfg.steps.length;
-  const dots = cfg.steps.map((_,k)=>`<span class="dot ${k<i?"done":k===i?"now":""}"></span>`).join("");
-  return folder(`${(prog.team||"DETECTIVES").toUpperCase()} · AANWIJZING ${i+1}/${n}`, `
-    <div class="progress" aria-label="Aanwijzing ${i+1} van ${n}">${dots}</div>
+  const i = prog.index, s = cfg.steps[i], n = cfg.steps.length, k = kind(s), sub = prog.sub;
+  const dots = cfg.steps.map((_,j)=>`<span class="dot ${j<i?"done":j===i?"now":""}"></span>`).join("");
+  const label = { code:"AANWIJZING", photo:"WAAR IS DIT?", jigsaw:"FOTOPUZZEL", scramble:"LETTERPUZZEL", camera:"FOTO-OPDRACHT" }[k];
+  let text = s.clue || { photo:"Waar is dit? Zoek de plek van de foto. Daar ligt een briefje met een geheime code!",
+    jigsaw:"De foto is in stukjes gevallen! Tik op twee stukjes om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt." }[k] || "";
+  let extra = "", after = "";
+  const hint = ui.hintShown ? `<div class="hint-box"><b>Tip:</b> ${esc(s.hint)}</div>`
+    : (s.hint ? `<button class="btn ghost" data-act="hint">We komen er niet uit… geef een tip</button>` : "");
+
+  if (k==="code") after = hint + codeForm();
+  if (k==="photo"){
+    extra = `<div class="zoom"><img src="${imgs.get(s.photo)}" alt="Ingezoomde foto van de verstopplek" style="transform:scale(${ZOOMS[ui.zoom]})"></div>`;
+    after = (ui.zoom < ZOOMS.length-1 ? `<button class="btn alt" data-act="zoomOut">🔍 Zoom een beetje uit</button>` : "") + hint + codeForm();
+  }
+  if (k==="jigsaw"){
+    if (!sub.order){ sub.order = scrambled([...Array(9).keys()], r=>r.every((v,j)=>v===j)); saveProg(); }
+    if (sub.solved){
+      text = "Gelukt! Nu weten jullie waar het briefje ligt. Snel, ga kijken!";
+      extra = `<img class="full" src="${imgs.get(s.photo)}" alt="De verstopplek">`;
+      after = hint + codeForm();
+    } else {
+      extra = `<div class="jig">${sub.order.map((pc,pos)=>`<button data-act="tile" data-p="${pos}" class="${sub.sel===pos?"sel":""}" aria-label="Puzzelstukje ${pos+1}"
+        style="background-image:url(${imgs.get(s.photo)});background-position:${(pc%3)*50}% ${Math.floor(pc/3)*50}%"></button>`).join("")}</div>`;
+      after = hint;
+    }
+  }
+  if (k==="scramble"){
+    const word = norm(s.code);
+    if (!sub.tiles || sub.tiles.length!==word.length){ sub.tiles = scrambled([...word].map((_,j)=>j), r=>r.map(j=>word[j]).join("")===word); sub.picked=[]; saveProg(); }
+    const picked = sub.picked || [];
+    extra = `<div class="slots" aria-label="Jullie woord">${[...word].map((_,j)=>`<span class="slot">${picked[j]!=null?word[sub.tiles[picked[j]]]:""}</span>`).join("")}</div>`;
+    after = `<div class="letters">${sub.tiles.map((li,p)=>`<button class="tile" data-act="letter" data-p="${p}" ${picked.includes(p)?"disabled":""}>${word[li]}</button>`).join("")}</div>
+      <button class="btn alt small" data-act="unletter" ${picked.length?"":"disabled"}>⌫ Letter terug</button>
+      <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>` + hint;
+  }
+  if (k==="camera"){
+    const shown = sub.styled || sub.photo;
+    const camBtn = (txt, cls) => `<label class="btn ${cls}">${txt}<input type="file" accept="image/*" class="vh" id="cam"></label>`;
+    if (ui.busy) after = `<div class="busy"><span class="glass">🔍</span><p>${esc(ui.busy)}</p></div>`;
+    else if (!shown) after = camBtn("📷 Maak de foto", "") + `<p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>`;
+    else {
+      extra = `<img class="full" src="${imgs.get(shown)}" alt="Jullie foto">`;
+      after = `${s.ai && !sub.styled ? `<button class="btn" data-act="detectify">✨ Maak er detectives van!</button>` : ""}
+        <button class="btn ${s.ai && !sub.styled ? "alt" : ""}" data-act="usePhoto">${sub.styled ? "Super! Stop hem in het dossier" : "Deze foto is goed"}</button>
+        ${sub.styled ? `<button class="btn ghost" data-act="unstyle">Toch de gewone foto</button>` : ""}
+        ${camBtn("Nog een keer", "alt small")}
+        <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>`;
+    }
+  }
+
+  return folder(`${(prog.team||"DETECTIVES").toUpperCase()} · STAP ${i+1}/${n}`, `
+    <div class="progress" aria-label="Stap ${i+1} van ${n}">${dots}</div>
     <div class="paper"><span class="tape"></span>
-      <p class="type muted" style="margin-bottom:8px">AANWIJZING ${i+1}</p>
-      <p class="riddle">${esc(s.clue)}</p>
+      <p class="type muted" style="margin-bottom:8px">${label} ${i+1}</p>
+      ${text ? `<p class="riddle">${esc(text)}</p>` : ""}
+      ${extra}
     </div>
-    ${ui.hintShown ? `<div class="hint-box"><b>Tip:</b> ${esc(s.hint)}</div>`
-      : (s.hint ? `<button class="btn ghost" data-act="hint">We komen er niet uit… geef een tip</button>` : "")}
-    <form id="codeForm" class="stack" style="gap:10px" autocomplete="off">
-      <label class="lbl" for="code">Gevonden? Typ de geheime code van het briefje:</label>
-      <input type="text" id="code" class="code-input" autocapitalize="characters" spellcheck="false" placeholder="CODE">
-      <button class="btn" type="submit">Controleer code</button>
-      <p class="msg bad" id="msg" aria-live="polite">${esc(ui.msg)}</p>
-    </form>
+    ${after}
     ${evidenceList(i)}
   `);
 }
@@ -245,6 +517,7 @@ function renderSolved(){
       <p class="riddle" style="margin-top:12px">${esc(cfg.finalHide)}</p>
     </div>
     <p>Ga snel kijken! 🎉</p>
+    ${album()}
     <button class="btn alt" data-act="party">Nog meer confetti</button>
     <button class="btn ghost" data-act="restart">Opnieuw spelen</button>
   `);
@@ -252,56 +525,119 @@ function renderSolved(){
 
 /* ---------- parent setup ---------- */
 function renderGate(){
-  if(!ui.gateQ){ const a=6+(Math.random()*6|0), b=6+(Math.random()*4|0); ui.gateQ={a,b}; }
+  const pin = lock.mode==="pin" && lock.hash && !ui.recover;
+  if(!pin && !ui.gateQ) ui.gateQ = hardSum();
   return folder("ALLEEN VOOR OUDERS", `
     <h2>Instellingen</h2>
-    <p>Om de instellingen te openen: hoeveel is ${ui.gateQ.a} × ${ui.gateQ.b}?</p>
-    <form id="gateForm" class="stack" style="gap:10px">
-      <input type="text" id="gate" inputmode="numeric" class="code-input" placeholder="?">
+    <p>${pin ? "Typ de pincode om de instellingen te openen."
+      : `${ui.recover ? "Pincode vergeten? Los deze som op om toch binnen te komen. " : "Om de instellingen te openen: "}hoeveel is ${ui.gateQ.a} × ${ui.gateQ.b}?`}</p>
+    <form id="gateForm" class="stack" style="gap:10px" autocomplete="off">
+      <input type="${pin?"password":"text"}" id="gate" inputmode="numeric" class="code-input" placeholder="${pin?"PINCODE":"?"}" autocomplete="off">
       <button class="btn" type="submit">Open</button>
       <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>
     </form>
+    ${pin ? `<button class="btn ghost" data-act="forgotPin">Pincode vergeten?</button>` : ""}
     <button class="btn ghost" data-act="back">Terug naar het spel</button>
   `);
 }
 
-function renderSetup(){
-  const steps = cfg.steps.map((s,i)=>`
+function lockEditor(){
+  const mode = ui.lockDraft || lock.mode;
+  return `
+    <h2 style="font-size:20px;margin-top:8px">Toegang tot dit menu</h2>
+    ${ui.recovered ? `<p class="hint-box">Je bent binnengekomen met de reservesom. Kies hieronder een nieuwe pincode.</p>` : ""}
+    <div><label class="lbl" for="lock-mode">Beveiliging (wordt elke keer gevraagd)</label>
+      <select id="lock-mode">
+        <option value="math" ${mode==="math"?"selected":""}>Rekensom (bijv. 12 × 45)</option>
+        <option value="pin" ${mode==="pin"?"selected":""}>Pincode</option>
+      </select></div>
+    ${mode==="pin" ? `<div class="row">
+        <div><label class="lbl" for="pin1">${lock.hash?"Nieuwe pincode (leeg = niet wijzigen)":"Pincode (4 tot 8 cijfers)"}</label><input type="password" id="pin1" inputmode="numeric" autocomplete="new-password" maxlength="8"></div>
+        <div><label class="lbl" for="pin2">Nog een keer</label><input type="password" id="pin2" inputmode="numeric" autocomplete="new-password" maxlength="8"></div>
+      </div>
+      <p class="muted" style="font-size:15px">Vergeten? Dan kom je binnen met een moeilijke rekensom (2 cijfers × 2 cijfers).</p>` : ""}
+    <button class="btn alt small" data-act="saveLock">Beveiliging opslaan</button>
+    <p class="msg" id="lockMsg" aria-live="polite"></p>`;
+}
+
+function stepEditor(s, i){
+  const t = s.type||"code", note = NOTE_TYPES.includes(t), hasPhoto = imgs.has(s.photo);
+  const clueLbl = { code:"Raadsel voor de kinderen", photo:"Tekst bij de foto (mag leeg)", jigsaw:"Tekst bij de puzzel (mag leeg)",
+    scramble:"Uitleg bij de puzzel", camera:"Opdracht: wat moeten ze fotograferen?" }[t];
+  const photoLbl = t==="photo" ? "Foto van de verstopplek (de kinderen zien eerst een ingezoomd stukje uit het midden)"
+    : "Foto van de verstopplek (wordt in 9 stukjes gehusseld)";
+  return `
     <div class="step-edit stack" style="gap:10px" data-i="${i}">
-      <div class="row" style="align-items:center"><b style="flex:0 0 auto">Plek ${i+1}</b>
+      <div class="row" style="align-items:center"><b style="flex:0 0 auto">Stap ${i+1}</b>
         <span style="display:flex;gap:6px;flex:0 0 auto;margin-left:auto">
           <button class="btn alt small" data-act="up" data-i="${i}" ${i===0?"disabled":""} aria-label="Omhoog">↑</button>
           <button class="btn alt small" data-act="down" data-i="${i}" ${i===cfg.steps.length-1?"disabled":""} aria-label="Omlaag">↓</button>
-          <button class="btn alt small" data-act="del" data-i="${i}" aria-label="Verwijder plek ${i+1}">✕</button>
+          <button class="btn alt small" data-act="del" data-i="${i}" aria-label="Verwijder stap ${i+1}">✕</button>
         </span></div>
-      <div><label class="lbl" for="place-${i}">Verstopplek (alleen voor jou)</label><input type="text" id="place-${i}" data-f="place" value="${esc(s.place)}"></div>
-      <div><label class="lbl" for="clue-${i}">Raadsel voor de kinderen</label><textarea id="clue-${i}" data-f="clue">${esc(s.clue)}</textarea></div>
+      <div><label class="lbl" for="type-${i}">Soort opdracht</label>
+        <select id="type-${i}" data-f="type">${Object.entries(TYPES).map(([v,l])=>`<option value="${v}" ${v===t?"selected":""}>${l}</option>`).join("")}</select></div>
+      ${t==="photo"||t==="jigsaw" ? `<div><span class="lbl">${photoLbl}</span>
+        <div class="row" style="align-items:center">
+          ${hasPhoto ? `<img class="thumb" src="${imgs.get(s.photo)}" alt="">` : `<span class="muted" style="flex:0 0 auto">Nog geen foto</span>`}
+          <label class="btn alt small">📷 ${hasPhoto?"Andere foto":"Kies of maak foto"}<input type="file" accept="image/*" class="vh" data-photo="${i}"></label>
+        </div></div>` : ""}
+      ${note ? `<div><label class="lbl" for="place-${i}">Verstopplek (alleen voor jou)</label><input type="text" id="place-${i}" data-f="place" value="${esc(s.place)}"></div>` : ""}
+      <div><label class="lbl" for="clue-${i}">${clueLbl}</label><textarea id="clue-${i}" data-f="clue">${esc(s.clue)}</textarea></div>
+      ${t==="camera" ? `<label class="check"><input type="checkbox" data-f="ai" ${s.ai?"checked":""}> Knop “Maak er detectives van” tonen</label>` : `
       <div class="row">
-        <div><label class="lbl" for="code-${i}">Geheime code op het briefje</label><input type="text" id="code-${i}" data-f="code" value="${esc(s.code)}" class="type" style="text-transform:uppercase"></div>
+        <div><label class="lbl" for="code-${i}">${t==="scramble"?"Woord om te puzzelen":"Geheime code op het briefje"}</label><input type="text" id="code-${i}" data-f="code" value="${esc(s.code)}" class="type" style="text-transform:uppercase"></div>
         <div><label class="lbl" for="hint-${i}">Tip</label><input type="text" id="hint-${i}" data-f="hint" value="${esc(s.hint)}"></div>
-      </div>
-      <div><label class="lbl" for="ev-${i}">Bewijsstuk dat ze hier vinden</label><textarea id="ev-${i}" data-f="evidence" style="min-height:64px">${esc(s.evidence)}</textarea></div>
-    </div>`).join("");
-  const notes = cfg.steps.map((s,i)=>`<div><span>${i+1}. ${esc(s.place)}</span><b>${esc(norm(s.code))}</b></div>`).join("");
+      </div>`}
+      <div><label class="lbl" for="ev-${i}">Bewijsstuk dat ze hier vinden${t==="camera"?" (mag leeg)":""}</label><textarea id="ev-${i}" data-f="evidence" style="min-height:64px">${esc(s.evidence)}</textarea></div>
+    </div>`;
+}
+
+function renderSetup(){
+  const notes = cfg.steps.map((s,i)=>NOTE_TYPES.includes(s.type||"code") ? `<div><span>${i+1}. ${esc(s.place)}</span><b>${esc(norm(s.code))}</b></div>` : "").join("");
   return folder("INSTELLINGEN · OUDERS", `
     <h2>Speurtocht instellen</h2>
     <p class="muted" style="font-size:16px">Alles wordt bewaard op dít apparaat. Stel het dus in op de telefoon of tablet waarmee de kinderen spelen.</p>
     <div><label class="lbl" for="s-title">Titel</label><input type="text" id="s-title" value="${esc(cfg.title)}"></div>
     <div><label class="lbl" for="s-story">Verhaal op het startscherm</label><textarea id="s-story">${esc(cfg.story)}</textarea></div>
-    <h2 style="font-size:20px;margin-top:8px">Plekken in huis</h2>
-    ${steps}
-    <button class="btn alt" data-act="add">+ Plek toevoegen</button>
+    ${lockEditor()}
+    <h2 style="font-size:20px;margin-top:8px">Opdrachten</h2>
+    <p class="muted" style="font-size:16px"><b>Raadsel + briefje</b>: zoek de plek, typ de code. <b>Waar is dit?</b>: een ingezoomde foto van de plek. <b>Fotopuzzel</b>: puzzel de foto van de plek in elkaar.
+      <b>Letterpuzzel</b>: zet de letters van een woord op volgorde. <b>Foto-opdracht</b>: de kinderen maken zelf een foto; die komt in het fotoalbum aan het eind.</p>
+    ${cfg.steps.map(stepEditor).join("")}
+    <button class="btn alt" data-act="add">+ Opdracht toevoegen</button>
     <h2 style="font-size:20px;margin-top:8px">Verdachten</h2>
     <div><label class="lbl" for="s-suspects">Namen, gescheiden door komma's</label><input type="text" id="s-suspects" value="${esc(cfg.suspects.join(", "))}"></div>
     <div><label class="lbl" for="s-culprit">Wie is de dader?</label>
       <select id="s-culprit">${cfg.suspects.map((n,k)=>`<option value="${k}" ${k===cfg.culpritIndex?"selected":""}>${esc(n)}</option>`).join("")}</select></div>
     <div><label class="lbl" for="s-final">Waar ligt de taart / traktatie echt?</label><input type="text" id="s-final" value="${esc(cfg.finalHide)}"></div>
+    <h2 style="font-size:20px;margin-top:8px">Detective-foto's met AI (optioneel)</h2>
+    <p class="muted" style="font-size:16px">Zonder sleutel maakt “Maak er detectives van” een detective-dossierfoto op het apparaat zelf.
+      Met een API-sleutel wordt de foto een getekend detective-plaatje (kost een paar cent per foto, duurt ±1 minuut, en de foto wordt naar die dienst gestuurd).
+      De sleutel blijft alleen op dit apparaat. Gebruik een aparte sleutel met een bestedingslimiet.</p>
+    <div><label class="lbl" for="ai-provider">Dienst</label>
+      <select id="ai-provider">${Object.entries(PROVIDERS).map(([k,p])=>`<option value="${k}" ${k===ai.provider?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+    <div><label class="lbl" for="ai-base">Adres (endpoint)</label><input type="text" id="ai-base" inputmode="url" spellcheck="false" placeholder="https://…/v1" value="${esc(ai.base)}"></div>
+    <div><label class="lbl" for="ai-style">Soort API</label>
+      <select id="ai-style">${Object.entries(STYLES).map(([k,l])=>`<option value="${k}" ${k===ai.style?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
+    ${ai.style==="mistral" ? `<p class="muted" style="font-size:15px">Let op: Mistral kan een foto niet bewerken. Het model bekijkt de foto en tekent een nieuw plaatje, dus de gezichten lijken minder.</p>` : ""}
+    <div><label class="lbl" for="ai-key">API-sleutel</label><input type="password" id="ai-key" autocomplete="off" placeholder="sk-…" value="${esc(aiKey())}"></div>
+    <div><label class="lbl" for="ai-model">Model</label>
+      ${ai.models.length ? `<select id="ai-model">${(ai.models.some(m=>m.id===ai.model) ? [] : [{id:ai.model}]).concat(ai.models)
+          .map(m=>`<option value="${esc(m.id)}" ${m.id===ai.model?"selected":""}>${m.img?"🖼 ":""}${esc(m.id)}</option>`).join("")}</select>`
+        : `<input type="text" id="ai-model" spellcheck="false" value="${esc(ai.model)}">`}</div>
+    <div class="row">
+      <button class="btn alt small" data-act="loadModels">Modellen ophalen</button>
+      ${ai.models.length ? `<button class="btn alt small" data-act="typeModel">Zelf een model typen</button>` : ""}
+    </div>
+    <p class="muted" style="font-size:14px">🖼 = maakt plaatjes${ai.style==="mistral" ? " (voor Mistral kies je juist een gewoon chatmodel, bijv. mistral-medium-latest)" : ""}.</p>
+    <p class="msg" id="aiMsg" aria-live="polite"></p>
+    <div><label class="lbl" for="ai-prompt">Opdracht aan de AI</label><textarea id="ai-prompt" style="min-height:120px">${esc(ai.prompt)}</textarea></div>
     <button class="btn" data-act="saveSetup">Opslaan</button>
     <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
     <p class="muted" style="font-size:16px">Schrijf elke code op een briefje en leg het op de juiste plek. Hoofdletters of spaties maken niet uit.</p>
     <div class="notes-list">${notes}</div>
     <h2 style="font-size:20px;margin-top:8px">Overzetten naar ander apparaat</h2>
-    <p class="muted" style="font-size:16px">Kopieer deze tekst, open het spel op het andere apparaat, ga naar Instellingen en plak hem hieronder.</p>
+    <p class="muted" style="font-size:16px">Kopieer deze tekst, open het spel op het andere apparaat, ga naar Instellingen en plak hem hieronder. Foto's en de AI-sleutel gaan niet mee: voeg die daar opnieuw toe.</p>
     <textarea id="s-json" class="type" style="font-size:13px;min-height:110px">${esc(JSON.stringify(cfg))}</textarea>
     <div class="row">
       <button class="btn alt small" data-act="copyJson">Kopieer</button>
@@ -324,10 +660,12 @@ function render(){
   else if (prog.phase==="accuse") html = renderAccuse();
   else if (prog.phase==="solved") html = renderSolved();
   else html = renderStart();
-  if (!ui.view) html += `<button class="parents" data-act="openSetup">Ouders</button>`;
+  if (!ui.view) html += `<button class="parents" data-act="openSetup">Ouders</button>`
+    + (canFs ? `<button class="fs-btn" data-act="fullscreen">${fsLabel()}</button>` : "");
   if (ui.overlay) html += ui.overlay;
   app.innerHTML = html;
-  const ci = document.getElementById("code"); if (ci && !ui.overlay) ci.focus({preventScroll:true});
+  const ci = document.getElementById("code");
+  if (ci && !ui.overlay && kind(cfg.steps[prog.index]||{})==="code") ci.focus({preventScroll:true});
 }
 
 function collectSetup(){
@@ -335,33 +673,102 @@ function collectSetup(){
   cfg.story = document.getElementById("s-story").value.trim();
   document.querySelectorAll(".step-edit").forEach(el=>{
     const i=+el.dataset.i;
-    el.querySelectorAll("[data-f]").forEach(f=>{ cfg.steps[i][f.dataset.f] = f.value.trim(); });
+    el.querySelectorAll("[data-f]").forEach(f=>{ cfg.steps[i][f.dataset.f] = f.type==="checkbox" ? f.checked : f.value.trim(); });
   });
   const sus = document.getElementById("s-suspects").value.split(",").map(s=>s.trim()).filter(Boolean);
   cfg.suspects = sus.length>=2 ? sus : cfg.suspects;
   cfg.culpritIndex = Math.min(+document.getElementById("s-culprit").value||0, cfg.suspects.length-1);
   cfg.finalHide = document.getElementById("s-final").value.trim();
+  collectAi();
+}
+
+function collectAi(){
+  ai.keys = { ...ai.keys, [ai.provider]: document.getElementById("ai-key").value.trim() };
+  ai.base = document.getElementById("ai-base").value.trim();
+  ai.style = document.getElementById("ai-style").value;
+  ai.model = document.getElementById("ai-model").value.trim();
+  ai.prompt = document.getElementById("ai-prompt").value.trim() || AI_DEFAULT.prompt;
+}
+const aiMsg = t => { const m=document.getElementById("aiMsg"); if(m) m.textContent=t; };
+
+function stepProblem(s){
+  const t = s.type||"code";
+  if (t==="camera") return s.clue ? "" : "mist nog een opdracht";
+  if (t==="scramble") return norm(s.code).length>=2 ? "" : "mist nog een woord om te puzzelen";
+  if ((t==="photo"||t==="jigsaw") && !imgs.has(s.photo)) return "mist nog een foto";
+  if (!norm(s.code)) return "mist nog een code";
+  return t==="code" && !s.clue ? "mist nog een raadsel" : "";
 }
 
 function setupMsg(t){ ui.msg=t; const m=document.getElementById("setupMsg"); if(m) m.textContent=t; }
 
+function newProg(team, phase){
+  prog.photos.forEach(p=>{ dropImage(p.id); if(p.orig!==p.id) dropImage(p.orig); });
+  dropImage(prog.sub.photo); dropImage(prog.sub.styled);
+  return { team, index:0, phase, wrongSuspects:[], sub:{}, photos:[] };
+}
+
+function solveStep(){
+  const s = cfg.steps[prog.index], k = kind(s), last = prog.index===cfg.steps.length-1;
+  beep(true); confetti();
+  const stamp = { scramble:"PUZZEL OPGELOST!", camera:"FOTO IN HET DOSSIER!" }[k] || "CODE GOED!";
+  ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="${stamp}"><div class="paper stack"><span class="tape"></span>
+    <span class="stamp" style="color:var(--good);border-color:var(--good)">${stamp}</span>
+    ${s.evidence ? `<p class="type muted">BEWIJSSTUK #${prog.index+1}</p><p class="riddle" style="font-size:20px">${esc(s.evidence)}</p>` : ""}
+    <button class="btn" data-act="next">${last?"Naar de ontknoping":"Volgende opdracht"}</button></div></div>`;
+  render(); app.querySelector(".overlay .btn")?.focus();
+}
+
 /* ---------- events ---------- */
-app.addEventListener("click", e=>{
-  const b = e.target.closest("[data-act]"); if(!b) return;
-  const act=b.dataset.act, i=+b.dataset.i;
+app.addEventListener("click", async e=>{
+  const b = e.target.closest("[data-act]"), act = b?.dataset.act;
+  if(act==="begin" || act==="resume") ui.wantFs = true;
+  if(ui.wantFs && canFs && !isFs() && act!=="fullscreen" && !e.target.closest("label")) goFull();
+  if(!b) return;
+  const i=+b.dataset.i, sub=prog.sub;
   ui.msg="";
   switch(act){
     case "begin": case "restart":
       if (act==="restart" && prog.phase!=="start" && !b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker weten? Tik nog een keer"; return; }
-      prog = { team:(document.getElementById("team")?.value||prog.team||"").trim(), index:0, phase: act==="begin"?"clue":"start", wrongSuspects:[] };
+      prog = newProg((document.getElementById("team")?.value||prog.team||"").trim(), act==="begin"?"clue":"start");
       if(act==="begin"){ keepAwake(); beep(true); }
-      ui.hintShown=false; saveProg(); render(); scrollTo(0,0); break;
+      ui.hintShown=false; ui.zoom=0; saveProg(); render(); scrollTo(0,0); break;
     case "resume":
       prog.team=(document.getElementById("team")?.value||prog.team).trim(); if(prog.phase==="start") prog.phase="clue";
       keepAwake(); saveProg(); render(); break;
     case "hint": ui.hintShown=true; render(); break;
+    case "zoomOut": ui.zoom=Math.min(ui.zoom+1, ZOOMS.length-1); render(); break;
+    case "tile": {
+      const p=+b.dataset.p;
+      if(sub.sel==null || sub.sel===p){ sub.sel = sub.sel===p ? null : p; }
+      else { [sub.order[sub.sel], sub.order[p]] = [sub.order[p], sub.order[sub.sel]]; sub.sel=null;
+        if(sub.order.every((v,j)=>v===j)){ sub.solved=true; beep(true); confetti(); } }
+      saveProg(); render(); break; }
+    case "letter": {
+      const s=cfg.steps[prog.index], word=norm(s.code);
+      sub.picked=[...(sub.picked||[]), +b.dataset.p];
+      if(sub.picked.length===word.length){
+        const guess=sub.picked.map(p=>word[sub.tiles[p]]).join(""); sub.picked=[]; saveProg();
+        if(guess===word) return solveStep();
+        beep(false); ui.msg=`“${guess}” is het niet. Probeer het nog een keer!`;
+      }
+      saveProg(); render(); break; }
+    case "unletter": sub.picked=(sub.picked||[]).slice(0,-1); saveProg(); render(); break;
+    case "detectify": {
+      const useAi = !!aiKey() && !!ai.base && !!ai.model;
+      ui.busy = useAi ? "De tekenaar van het detectivebureau is aan het werk… dit duurt ongeveer een minuut." : "Even ontwikkelen…";
+      render();
+      try{ sub.styled = useAi ? await aiDetective(sub.photo) : await localDetective(sub.photo); }
+      catch(err){
+        try{ sub.styled = await localDetective(sub.photo); ui.msg = "De AI-tekenaar lukte niet, dus we maken er een dossierfoto van."; console.warn(err); }
+        catch(err2){ ui.msg = "Dat lukte niet. Gebruik gewoon de gewone foto!"; }
+      }
+      ui.busy=""; saveProg(); render(); break; }
+    case "unstyle": dropImage(sub.styled); delete sub.styled; saveProg(); render(); break;
+    case "usePhoto":
+      prog.photos.push({ id: sub.styled||sub.photo, orig: sub.photo }); prog.sub={}; saveProg(); solveStep(); break;
     case "next":
-      ui.overlay=null; ui.hintShown=false;
+      ui.overlay=null; ui.hintShown=false; ui.zoom=0; prog.sub={};
       prog.index++; prog.phase = prog.index>=cfg.steps.length ? "accuse" : "clue";
       saveProg(); render(); scrollTo(0,0); break;
     case "accuse": {
@@ -370,16 +777,37 @@ app.addEventListener("click", e=>{
       else { prog.wrongSuspects.push(k); saveProg(); beep(false); ui.msg="Nee hoor! Kijk nog eens goed naar de bewijsstukken."; render(); }
       break; }
     case "party": beep(true); confetti(); break;
-    case "openSetup": ui.view = ui.setupUnlocked ? "setup" : "gate"; ui.gateQ=null; render(); scrollTo(0,0); break;
-    case "back": ui.view=null; render(); scrollTo(0,0); break;
-    case "add": collectSetup(); cfg.steps.push({clue:"",place:"",code:"",hint:"",evidence:""}); render(); break;
+    case "loadModels":
+      collectAi(); if(!ai.base) return aiMsg("Vul eerst het adres in."); aiMsg("Modellen ophalen…");
+      try{ const ms = await fetchModels(); if(!ms.length) throw new Error("Geen modellen gevonden");
+        ai.models = ms; save(KEY_AI, ai); collectSetup(); render(); aiMsg(`${ms.length} modellen gevonden.`); }
+      catch(err){ aiMsg(`Ophalen lukte niet: ${err.message}`); }
+      break;
+    case "typeModel": collectSetup(); ai.models=[]; render(); document.getElementById("ai-model")?.focus(); break;
+    case "fullscreen": ui.wantFs = !isFs(); ui.wantFs ? goFull() : exitFull(); break;
+    case "openSetup": ui.view="gate"; ui.gateQ=null; ui.recover=false; render(); scrollTo(0,0); document.getElementById("gate")?.focus(); break;
+    case "back": ui.view=null; ui.recover=false; ui.recovered=false; ui.lockDraft=null; render(); scrollTo(0,0); break;
+    case "forgotPin": ui.recover=true; ui.gateQ=null; render(); break;
+    case "saveLock": {
+      const mode=document.getElementById("lock-mode").value, msg=t=>{ const m=document.getElementById("lockMsg"); if(m) m.textContent=t; };
+      if(mode==="math"){ lock={ mode:"math" }; save(KEY_LOCK, lock); ui.lockDraft=null; return msg("Opgeslagen: er wordt een rekensom gevraagd."); }
+      const p1=document.getElementById("pin1").value.trim(), p2=document.getElementById("pin2").value.trim();
+      if(!p1 && !p2 && lock.mode==="pin" && lock.hash) return msg("De pincode blijft hetzelfde.");
+      if(!/^\d{4,8}$/.test(p1)) return msg("Kies een pincode van 4 tot 8 cijfers.");
+      if(p1!==p2) return msg("De twee pincodes zijn niet hetzelfde.");
+      const salt=Math.random().toString(36).slice(2);
+      lock={ mode:"pin", salt, hash: await hashPin(p1, salt) }; save(KEY_LOCK, lock); ui.lockDraft=null; ui.recovered=false;
+      document.getElementById("pin1").value=document.getElementById("pin2").value="";
+      msg("Pincode opgeslagen. Die wordt voortaan elke keer gevraagd."); break; }
+    case "add": collectSetup(); cfg.steps.push({type:"code",clue:"",place:"",code:"",hint:"",evidence:""}); render(); break;
     case "del": collectSetup(); if(cfg.steps.length>1){ cfg.steps.splice(i,1); } render(); break;
     case "up": case "down": { collectSetup(); const j = act==="up"?i-1:i+1; [cfg.steps[i],cfg.steps[j]]=[cfg.steps[j],cfg.steps[i]]; render(); break; }
     case "saveSetup": {
-      collectSetup();
-      const empty = cfg.steps.findIndex(s=>!norm(s.code) || !s.clue);
-      if(empty>=0){ setupMsg(`Plek ${empty+1} mist nog een raadsel of code.`); return; }
-      save(KEY_CFG,cfg); if(prog.index>=cfg.steps.length && prog.phase==="clue"){ prog.index=0; saveProg(); }
+      collectSetup(); save(KEY_AI, ai);
+      const bad = cfg.steps.findIndex(s=>stepProblem(s));
+      if(bad>=0){ setupMsg(`Stap ${bad+1} ${stepProblem(cfg.steps[bad])}.`); return; }
+      save(KEY_CFG,cfg); gcImages();
+      if(prog.index>=cfg.steps.length && prog.phase==="clue"){ prog.index=0; prog.sub={}; saveProg(); }
       render(); setupMsg("Opgeslagen."); break; }
     case "copyJson": {
       const t=document.getElementById("s-json");
@@ -389,13 +817,38 @@ app.addEventListener("click", e=>{
     case "importJson":
       try{ const c=JSON.parse(document.getElementById("s-json").value);
         if(!Array.isArray(c.steps)||!c.steps.length||!Array.isArray(c.suspects)) throw 0;
-        cfg=Object.assign(structuredClone(DEFAULT), c); save(KEY_CFG,cfg); render(); setupMsg("Instellingen overgenomen.");
+        cfg=Object.assign(structuredClone(DEFAULT), c); save(KEY_CFG,cfg); render(); setupMsg("Instellingen overgenomen. Voeg eventuele foto's opnieuw toe.");
       }catch(err){ setupMsg("Die tekst klopt niet. Kopieer alles opnieuw vanaf het andere apparaat."); }
       break;
-    case "resetProg": prog={team:"",index:0,phase:"start",wrongSuspects:[]}; saveProg(); render(); setupMsg("Spel staat weer aan het begin."); break;
+    case "resetProg": prog=newProg("","start"); saveProg(); render(); setupMsg("Spel staat weer aan het begin."); break;
     case "resetAll":
       if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker? Tik nog een keer"; return; }
-      cfg=structuredClone(DEFAULT); save(KEY_CFG,cfg); render(); setupMsg("Voorbeeldtocht hersteld."); break;
+      cfg=structuredClone(DEFAULT); save(KEY_CFG,cfg); gcImages(); render(); setupMsg("Voorbeeldtocht hersteld."); break;
+  }
+});
+
+app.addEventListener("change", async e=>{
+  const t=e.target;
+  if(t.matches('select[data-f="type"]') || t.id==="ai-style"){ collectSetup(); render(); return; }
+  if(t.id==="lock-mode"){ collectSetup(); ui.lockDraft=t.value; render(); document.getElementById("lock-mode")?.scrollIntoView({block:"center"}); return; }
+  if(t.id==="ai-provider"){
+    collectSetup(); const p = PROVIDERS[t.value];
+    ai.provider = t.value; ai.models = [];
+    if (t.value!=="custom"){ ai.base = p.base; ai.style = p.style; ai.model = p.model; }
+    render(); return;
+  }
+  if(t.dataset.photo!==undefined && t.files[0]){
+    collectSetup(); setupMsg("Foto wordt verwerkt…");
+    try{ cfg.steps[+t.dataset.photo].photo = await storeImage(t.files[0], "p-", true); ui.msg=""; render(); }
+    catch(err){ setupMsg("Die foto kon niet geladen worden."); }
+    return;
+  }
+  if(t.id==="cam" && t.files[0]){
+    const file=t.files[0]; ui.busy="Foto wordt ontwikkeld…"; ui.msg=""; render();
+    try{ const id=await storeImage(file, "k-", false);
+      dropImage(prog.sub.photo); dropImage(prog.sub.styled); prog.sub={ photo:id }; saveProg(); }
+    catch(err){ ui.msg="Dat lukte niet. Probeer het nog een keer."; }
+    ui.busy=""; render();
   }
 });
 
@@ -404,31 +857,31 @@ app.addEventListener("submit", e=>{
   if(e.target.id==="codeForm"){
     const input=document.getElementById("code"), s=cfg.steps[prog.index];
     if(!norm(input.value)) return;
-    if(norm(input.value)===norm(s.code)){
-      beep(true); confetti();
-      const last = prog.index===cfg.steps.length-1;
-      ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="Code goed"><div class="paper stack"><span class="tape"></span>
-        <span class="stamp" style="color:var(--good);border-color:var(--good)">CODE GOED!</span>
-        <p class="type muted">BEWIJSSTUK #${prog.index+1}</p>
-        <p class="riddle" style="font-size:20px">${esc(s.evidence)}</p>
-        <button class="btn" data-act="next">${last?"Naar de ontknoping":"Volgende aanwijzing"}</button></div></div>`;
-      render(); app.querySelector(".overlay .btn")?.focus();
-    } else {
+    if(norm(input.value)===norm(s.code)) solveStep();
+    else {
       beep(false); input.classList.remove("shake"); void input.offsetWidth; input.classList.add("shake");
       document.getElementById("msg").textContent = "Die code klopt niet. Kijk nog eens goed op het briefje!";
       input.select();
     }
   }
-  if(e.target.id==="gateForm"){
-    if(+document.getElementById("gate").value === ui.gateQ.a*ui.gateQ.b){ ui.setupUnlocked=true; ui.view="setup"; ui.msg=""; render(); scrollTo(0,0); }
-    else { ui.msg="Dat is niet goed."; ui.gateQ=null; render(); }
-  }
+  if(e.target.id==="gateForm") (async()=>{
+    const val=document.getElementById("gate").value.trim(), pin = lock.mode==="pin" && lock.hash && !ui.recover;
+    if(Date.now() < ui.lockUntil){ ui.msg=`Te vaak fout. Wacht ${Math.ceil((ui.lockUntil-Date.now())/1000)} seconden.`; return render(); }
+    const ok = pin ? (await hashPin(val, lock.salt)) === lock.hash : val!=="" && +val === ui.gateQ.a*ui.gateQ.b;
+    if(ok){ ui.fails=0; ui.recovered=ui.recover; ui.recover=false; ui.view="setup"; ui.msg=""; render(); scrollTo(0,0); }
+    else {
+      if(++ui.fails % 5 === 0) ui.lockUntil = Date.now() + 30000;
+      ui.msg = pin ? "Die pincode klopt niet." : "Dat is niet goed. Hier is een nieuwe som."; ui.gateQ=null; render();
+    }
+  })();
 });
 
 app.addEventListener("input", e=>{ if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); } });
 
-window.claude?.hot?.snapshot?.(()=>({ ui:{view:ui.view, setupUnlocked:ui.setupUnlocked} }));
-function start(data){ if(data && data.ui){ ui.view=data.ui.view||null; ui.setupUnlocked=!!data.ui.setupUnlocked; } render(); }
+window.claude?.hot?.snapshot?.(()=>({ ui:{} })); // never restore an unlocked menu
+function start(data){
+  DB.all().then(m=>m.forEach((blob,k)=>imgs.set(k, URL.createObjectURL(blob)))).catch(()=>{}).finally(render);
+}
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
 })();
 </script>
