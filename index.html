@@ -198,6 +198,8 @@ const AI_DEFAULT = {
   prompt: "Turn this photo into a bright, friendly children's picture-book illustration in which everyone is a detective: deerstalker hats, magnifying glasses, little trench coats, a playful mystery atmosphere with a birthday cake hidden somewhere. Keep exactly the same people, their faces, hair, poses and the number of people. Cheerful, warm, kid-friendly, no text."
 };
 
+// Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
+const VERSION = 12;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -807,6 +809,7 @@ function renderSetup(){
       <button class="btn alt small" data-act="resetAll">Voorbeeld herstellen</button>
     </div>
     <button class="btn ghost" data-act="back">Terug naar het spel</button>
+    <p class="muted" style="font-size:14px;text-align:center">Versie ${VERSION}</p>
   `);
 }
 
