@@ -149,6 +149,7 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .viewfinder .flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none}
 .viewfinder .flash.go{animation:flash .5s ease-out}
 @keyframes flash{from{opacity:1} to{opacity:0}}
+.ailog{white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.4 ui-monospace, Menlo, monospace; margin:6px 0 0; color:var(--ink)}
 .check{display:flex; gap:10px; align-items:center; font-size:16px}
 .check input{width:24px; height:24px}
 @media (prefers-reduced-motion: reduce){ *{animation:none!important; transition:none!important} }
@@ -295,15 +296,22 @@ async function localDetective(id){
 const blobToDataUrl = blob => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); });
 const b64ToBlob = (b64, type="image/png") => { const bin=atob(b64), u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return new Blob([u8],{type}); };
 const apiUrl = path => ai.base.trim().replace(/\/+$/,"") + path;
+// Every request of the current drawing is logged, so a failure can say which step went wrong.
+let aiLog = [];
+const errText = j => { for (const v of [j.error?.message, j.error, j.message, j.detail?.[0]?.msg, j.detail]) if (v) return typeof v==="string" ? v : JSON.stringify(v);
+  return ""; };
 async function api(path, opts={}){
   const headers = { Authorization:`Bearer ${aiKey()}`, ...(opts.json ? { "Content-Type":"application/json" } : {}) };
+  const method = opts.method || (opts.body||opts.json ? "POST" : "GET");
   let r;
-  try{ r = await fetch(apiUrl(path), { method: opts.method || (opts.body||opts.json ? "POST" : "GET"), headers, body: opts.json ? JSON.stringify(opts.json) : opts.body }); }
+  try{ r = await fetch(apiUrl(path), { method, headers, body: opts.json ? JSON.stringify(opts.json) : opts.body }); }
   catch(e){ const host = (()=>{ try{ return new URL(apiUrl(path)).host; }catch(_){ return ai.base; } })();
-    throw new Error(`${host} gaf geen antwoord. Is er internet? Zo ja, dan staat ${host} waarschijnlijk geen verzoeken vanaf een webpagina toe (CORS).`); }
-  if (opts.raw && r.ok) return r;
-  const j = await r.json().catch(()=>({}));
-  if (!r.ok) throw Object.assign(new Error(j.error?.message || j.message || j.detail?.[0]?.msg || (typeof j.detail==="string" && j.detail) || `HTTP ${r.status}`), { status:r.status });
+    aiLog.push(`${method} ${path.split("?")[0]} → geen antwoord`);
+    throw new Error(`${host} gaf geen antwoord bij ${path.split("?")[0]}. Is er internet? Zo ja, dan blokkeert de browser dit verzoek (CORS).`); }
+  if (opts.raw && r.ok){ aiLog.push(`${method} ${path.split("?")[0]} → ${r.status}`); return r; }
+  const txt = await r.text().catch(()=>""), j = (()=>{ try{ return JSON.parse(txt); }catch(_){ return {}; } })();
+  aiLog.push(`${method} ${path.split("?")[0]} → ${r.status}${r.ok ? "" : ` ${(errText(j) || txt).slice(0,300)}`}`);
+  if (!r.ok) throw Object.assign(new Error(`${r.status} bij ${path.split("?")[0]}: ${(errText(j) || txt || r.statusText).slice(0,200)}`), { status:r.status });
   return j;
 }
 async function fetchModels(){
@@ -313,6 +321,11 @@ async function fetchModels(){
     .sort((a,b)=> (b.img-a.img) || a.id.localeCompare(b.id));
 }
 async function aiDetective(id){
+  aiLog = [];
+  try{ return await aiDraw(id); }
+  catch(e){ e.log = aiLog.slice(); throw e; }
+}
+async function aiDraw(id){
   const blob = await (await fetch(imgs.get(id))).blob(), prompt = ai.prompt || AI_DEFAULT.prompt;
   const toImage = async url => (await fetch(url)).blob();
   let out;
@@ -348,7 +361,14 @@ async function aiDetective(id){
       else throw e;
     }
     const file = (j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[]).find(c=>c.type==="tool_file" && c.file_id);
-    if (file) out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob();
+    if (file){
+      try{ out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob(); }
+      catch(e){ // fall back to a signed download link
+        const { url } = await api(`/files/${file.file_id}/url?expiry=1`);
+        try{ out = await (await fetch(url)).blob(); aiLog.push("GET (download-link) → ok"); }
+        catch(_){ aiLog.push("GET (download-link) → geen antwoord"); throw e; }
+      }
+    }
     else throw new Error(((j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[{text:o.content}]).map(c=>c.text||"").join(" ").trim().slice(0,120)) || "Mistral maakte geen plaatje");
   } else {
     const send = extra => {
@@ -571,7 +591,8 @@ function renderClue(){
     else {
       extra = `<img class="full" src="${imgs.get(shown)}" alt="Jullie foto">`;
       const offer = s.ai && !sub.styled;
-      after = `${offer && ui.aiError ? `<div class="hint-box"><b>De AI-tekenaar lukte niet.</b><br>${esc(ui.aiError)}</div>
+      after = `${offer && ui.aiError ? `<div class="hint-box"><b>De AI-tekenaar lukte niet.</b><br>${esc(ui.aiError)}
+            ${ui.aiLog?.length ? `<details style="margin-top:6px"><summary>Technische details</summary><pre class="ailog">${esc(ui.aiLog.join("\n"))}</pre></details>` : ""}</div>
           <div class="row"><button class="btn" data-act="detectify">Opnieuw tekenen</button><button class="btn alt" data-act="detectLocal">Maak een dossierfoto</button></div>`
         : offer ? `<button class="btn" data-act="detectify">✨ Maak er detectives van!</button>
           <p class="muted" style="font-size:14px;text-align:center">${aiReady() ? `Getekend door ${esc(PROVIDERS[ai.provider]?.name || "AI")} (${esc(ai.model)})` : "Zonder AI: er is geen sleutel ingesteld bij Ouders"}</p>` : ""}
@@ -724,10 +745,12 @@ function renderSetup(){
         : `<input type="text" id="ai-model" spellcheck="false" value="${esc(ai.model)}">`}</div>
     <div class="row">
       <button class="btn alt small" data-act="loadModels">Modellen ophalen</button>
+      <button class="btn alt small" data-act="testAi">Test de AI-tekenaar</button>
       ${ai.models.length ? `<button class="btn alt small" data-act="typeModel">Zelf een model typen</button>` : ""}
     </div>
     <p class="muted" style="font-size:14px">🖼 = maakt plaatjes${ai.style==="mistral" ? " (voor Mistral kies je juist een gewoon chatmodel, bijv. mistral-medium-latest)" : ""}.</p>
     <p class="msg" id="aiMsg" aria-live="polite">${esc(aiStatus())}</p>
+    <div id="aiTest" class="stack" style="gap:8px"></div>
     <div><label class="lbl" for="ai-prompt">Opdracht aan de AI</label><textarea id="ai-prompt" style="min-height:120px">${esc(ai.prompt)}</textarea></div>
     <button class="btn" data-act="saveSetup">Opslaan</button>
     <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
@@ -859,7 +882,7 @@ app.addEventListener("click", async e=>{
       ui.busy = useAi ? `De tekenaar van het detectivebureau (${PROVIDERS[ai.provider]?.name || "AI"}) is aan het werk… dit duurt ongeveer een minuut.` : "Even ontwikkelen…";
       render();
       try{ sub.styled = useAi ? await aiDetective(sub.photo) : await localDetective(sub.photo); }
-      catch(err){ console.warn(err); if(useAi) ui.aiError = err.message || String(err); else ui.msg = "Dat lukte niet. Gebruik gewoon de gewone foto!"; }
+      catch(err){ console.warn(err); if(useAi){ ui.aiError = err.message || String(err); ui.aiLog = err.log; } else ui.msg = "Dat lukte niet. Gebruik gewoon de gewone foto!"; }
       ui.busy=""; saveProg(); render(); break; }
     case "snap": case "timer": camSnap(act==="timer"); break;
     case "flip": cam.facing = cam.facing==="user" ? "environment" : "user"; camStop(); render(); break;
@@ -883,6 +906,24 @@ app.addEventListener("click", async e=>{
         ai.models = ms; save(KEY_AI, ai); collectSetup(); render(); aiMsg(`${ms.length} modellen gevonden.`); }
       catch(err){ aiMsg(`Ophalen lukte niet: ${err.message}`); }
       break;
+    case "testAi": {
+      collectAi(); save(KEY_AI, ai);
+      const box = document.getElementById("aiTest");
+      if(!aiReady()){ aiMsg("Vul eerst een sleutel, adres en model in."); break; }
+      box.innerHTML = `<div class="busy"><span class="glass">🔍</span><p>Testplaatje wordt getekend… dit duurt ongeveer een minuut.</p></div>`;
+      // a small made-up "team photo", so the test doesn't need the camera
+      const c = document.createElement("canvas"); c.width = 640; c.height = 480; const x = c.getContext("2d");
+      x.fillStyle = "#9fd3ee"; x.fillRect(0,0,640,480); x.fillStyle = "#6bbf59"; x.fillRect(0,360,640,120);
+      [[200,"#f2c29b"],[320,"#c68a5e"],[440,"#f7d7b5"]].forEach(([cx,skin])=>{ x.fillStyle="#d9534f"; x.fillRect(cx-45,250,90,140);
+        x.fillStyle=skin; x.beginPath(); x.arc(cx,210,45,0,7); x.fill(); x.fillStyle="#222"; x.fillRect(cx-18,200,8,8); x.fillRect(cx+10,200,8,8); });
+      const inId = await keepBlob(await toBlob(c), "t-");
+      try{
+        const outId = await aiDetective(inId);
+        box.innerHTML = `<p class="msg">✓ Het werkt!</p><img class="full" src="${imgs.get(outId)}" alt="Testplaatje"><pre class="ailog">${esc(aiLog.join("\n"))}</pre>`;
+      }catch(err){
+        box.innerHTML = `<div class="hint-box"><b>Dat lukte niet.</b><br>${esc(err.message||String(err))}<pre class="ailog">${esc((err.log||[]).join("\n"))}</pre></div>`;
+      }
+      dropImage(inId); break; }
     case "typeModel": collectSetup(); ai.models=[]; render(); document.getElementById("ai-model")?.focus(); break;
     case "fullscreen": ui.wantFs = !isFs(); ui.wantFs ? goFull() : exitFull(); break;
     case "openSetup": ui.view="gate"; ui.gateQ=null; ui.recover=false; render(); scrollTo(0,0); document.getElementById("gate")?.focus(); break;
