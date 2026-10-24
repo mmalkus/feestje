@@ -134,6 +134,13 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .album{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:14px}
 .album img{width:100%; background:#fff; padding:6px 6px 24px; box-sizing:border-box; box-shadow:0 4px 10px rgba(0,0,0,.25); transform:rotate(-2deg)}
 .album img:nth-child(even){transform:rotate(2deg)}
+.viewfinder{position:relative; margin-top:12px; border-radius:6px; overflow:hidden; background:#000; aspect-ratio:4/3}
+.viewfinder video{width:100%; height:100%; object-fit:cover; display:block}
+.viewfinder video.mirror{transform:scaleX(-1)}
+.viewfinder .count{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font:400 120px var(--f-display); color:#fff; text-shadow:0 4px 14px rgba(0,0,0,.6); pointer-events:none}
+.viewfinder .flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none}
+.viewfinder .flash.go{animation:flash .5s ease-out}
+@keyframes flash{from{opacity:1} to{opacity:0}}
 .check{display:flex; gap:10px; align-items:center; font-size:16px}
 .check input{width:24px; height:24px}
 @media (prefers-reduced-motion: reduce){ *{animation:none!important; transition:none!important} }
@@ -357,6 +364,60 @@ function beep(ok){
   }catch(e){}
 }
 
+function tick(high){
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=actx.createOscillator(), g=actx.createGain(), t=actx.currentTime;
+    o.frequency.value = high ? 1320 : 880; g.gain.setValueAtTime(.2,t); g.gain.exponentialRampToValueAtTime(.0001,t+.15);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t+.2);
+  }catch(e){}
+}
+
+/* ---------- in-game camera (live viewfinder; falls back to the system camera via a file input) ---------- */
+const cam = { stream:null, pending:null, facing:"user", error:false, busy:false };
+const camOk = () => !!navigator.mediaDevices?.getUserMedia && !cam.error;
+function camStop(){ cam.stream?.getTracks().forEach(t=>t.stop()); cam.stream=null; }
+function camStart(){
+  if (cam.stream && cam.stream.getVideoTracks()[0]?.readyState==="ended") camStop(); // e.g. after switching apps
+  if (cam.stream) return Promise.resolve(cam.stream);
+  return cam.pending || (cam.pending = navigator.mediaDevices.getUserMedia({ audio:false,
+      video:{ facingMode:cam.facing, width:{ ideal:1920 }, height:{ ideal:1440 } } })
+    .then(st => (cam.stream = st))
+    .catch(err => { console.warn(err); cam.error = true; render(); return null; })
+    .finally(() => { cam.pending = null; }));
+}
+// Called after every render: the viewfinder <video> is new each time, so (re)attach the stream, or stop it when gone.
+async function camAttach(){
+  if (!document.getElementById("vf")){ camStop(); return; }
+  const st = await camStart(), v = document.getElementById("vf");
+  if (!v){ camStop(); return; }
+  if (st && v.srcObject !== st){ v.srcObject = st; v.play().catch(()=>{}); }
+}
+document.addEventListener("visibilitychange", ()=>{ if (document.visibilityState==="visible") camAttach(); });
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+async function camSnap(countdown){
+  const v = document.getElementById("vf");
+  if (!v || !v.videoWidth || cam.busy) return;
+  cam.busy = true; app.querySelectorAll("[data-act=snap],[data-act=timer],[data-act=flip]").forEach(b=>b.disabled=true);
+  if (countdown){
+    const c = document.getElementById("count");
+    for (const n of [3,2,1]){ if(c) c.textContent = n; tick(false); await sleep(1000); }
+    if(c) c.textContent = "";
+  }
+  tick(true);
+  const f = document.getElementById("flash"); f?.classList.add("go");
+  const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight;
+  const x = c.getContext("2d");
+  if (cam.facing==="user"){ x.translate(c.width,0); x.scale(-1,1); } // save it the way the kids saw it
+  x.drawImage(v, 0, 0);
+  await sleep(250);
+  try{
+    const id = await storeImage(await toBlob(c), "k-", false);
+    dropImage(prog.sub.photo); dropImage(prog.sub.styled); prog.sub = { photo:id }; saveProg();
+  }catch(err){ ui.msg = "Dat lukte niet. Probeer het nog een keer."; }
+  cam.busy = false; render();
+}
+
 /* ---------- confetti ---------- */
 function confetti(){
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -472,15 +533,22 @@ function renderClue(){
   }
   if (k==="camera"){
     const shown = sub.styled || sub.photo;
-    const camBtn = (txt, cls) => `<label class="btn ${cls}">${txt}<input type="file" accept="image/*" class="vh" id="cam"></label>`;
+    const camBtn = (txt, cls) => `<label class="btn ${cls}">${txt}<input type="file" accept="image/*" capture="${cam.facing}" class="vh" id="cam"></label>`;
     if (ui.busy) after = `<div class="busy"><span class="glass">🔍</span><p>${esc(ui.busy)}</p></div>`;
+    else if (!shown && camOk()){
+      extra = `<div class="viewfinder"><video id="vf" class="${cam.facing==="user"?"mirror":""}" playsinline muted autoplay></video>
+        <div class="count" id="count" aria-live="assertive"></div><div class="flash" id="flash"></div></div>`;
+      after = `<div class="row"><button class="btn" data-act="snap">📸 Klik!</button><button class="btn alt" data-act="timer">⏱ Aftellen 3-2-1</button></div>
+        <button class="btn ghost" data-act="flip">🔄 Andere camera</button>
+        <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>`;
+    }
     else if (!shown) after = camBtn("📷 Maak de foto", "") + `<p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>`;
     else {
       extra = `<img class="full" src="${imgs.get(shown)}" alt="Jullie foto">`;
       after = `${s.ai && !sub.styled ? `<button class="btn" data-act="detectify">✨ Maak er detectives van!</button>` : ""}
         <button class="btn ${s.ai && !sub.styled ? "alt" : ""}" data-act="usePhoto">${sub.styled ? "Super! Stop hem in het dossier" : "Deze foto is goed"}</button>
         ${sub.styled ? `<button class="btn ghost" data-act="unstyle">Toch de gewone foto</button>` : ""}
-        ${camBtn("Nog een keer", "alt small")}
+        <button class="btn alt small" data-act="retake">Nog een keer</button>
         <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>`;
     }
   }
@@ -664,6 +732,7 @@ function render(){
     + (canFs ? `<button class="fs-btn" data-act="fullscreen">${fsLabel()}</button>` : "");
   if (ui.overlay) html += ui.overlay;
   app.innerHTML = html;
+  camAttach();
   const ci = document.getElementById("code");
   if (ci && !ui.overlay && kind(cfg.steps[prog.index]||{})==="code") ci.focus({preventScroll:true});
 }
@@ -764,6 +833,9 @@ app.addEventListener("click", async e=>{
         catch(err2){ ui.msg = "Dat lukte niet. Gebruik gewoon de gewone foto!"; }
       }
       ui.busy=""; saveProg(); render(); break; }
+    case "snap": case "timer": camSnap(act==="timer"); break;
+    case "flip": cam.facing = cam.facing==="user" ? "environment" : "user"; camStop(); render(); break;
+    case "retake": dropImage(sub.photo); dropImage(sub.styled); prog.sub={}; saveProg(); render(); break;
     case "unstyle": dropImage(sub.styled); delete sub.styled; saveProg(); render(); break;
     case "usePhoto":
       prog.photos.push({ id: sub.styled||sub.photo, orig: sub.photo }); prog.sub={}; saveProg(); solveStep(); break;

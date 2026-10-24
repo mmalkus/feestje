@@ -29,6 +29,8 @@ Each step in the setup has a type:
 - **Fotopuzzel**: a photo of the hiding spot cut into 9 tiles; tap two tiles to swap them. Once it's solved they go there and type the code.
 - **Letterpuzzel**: put the shuffled letters of a word in order, all on the tablet.
 - **Foto-opdracht**: the kids take a photo (e.g. a team photo). It ends up in the photo album on the final screen.
+  The camera opens right inside the game (live viewfinder, "📸 Klik!", a 3-2-1 self-timer and a front/back switch).
+  The browser asks for camera permission once; if it's refused or not available, the button opens the device's own camera instead.
   With "Maak er detectives van" on, they can turn it into a detective picture:
   - without an API key: a sepia "case file" print with a TOPDETECTIVES stamp, made on the device;
   - with an API key (Ouders → Detective-foto's met AI): a picture-book illustration of the group as detectives.
