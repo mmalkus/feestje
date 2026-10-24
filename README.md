@@ -40,6 +40,9 @@ Each step in the setup has a type:
     - *Chat met plaatje terug*: `POST /chat/completions` with image output (e.g. OpenRouter `google/gemini-2.5-flash-image`);
     - *Mistral agent*: creates an agent with the `image_generation` tool and runs it via `/conversations`. Mistral can't edit
       photos, so it draws a new picture from what it sees and faces will resemble the kids less.
+    "Lokale server (Flux 2)" needs no key: point the endpoint at your own server that offers `POST /images/edits`
+    (default `http://localhost:8000/v1`, model `flux-2`; adjust both to your server). The photo stays on your network.
+    The server must allow CORS, and on an https page browsers only allow `http://localhost` (not other http addresses).
     Keys are stored per service only in that browser's localStorage and are not in the copy/paste export.
     Use a dedicated key with a spending limit. The photo is sent to the chosen service. The service must allow calls
     from a browser (CORS); if it doesn't, the button falls back to the on-device version and shows a message.

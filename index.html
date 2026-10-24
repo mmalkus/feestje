@@ -190,6 +190,7 @@ const PROVIDERS = {
   openai:     { name:"OpenAI",     base:"https://api.openai.com/v1",    style:"edits",   model:"gpt-image-1" },
   openrouter: { name:"OpenRouter", base:"https://openrouter.ai/api/v1", style:"chat",    model:"google/gemini-2.5-flash-image" },
   mistral:    { name:"Mistral",    base:"https://api.mistral.ai/v1",    style:"mistral", model:"mistral-medium-latest" },
+  local:      { name:"Lokale server (Flux 2)", base:"http://localhost:8000/v1", style:"edits", model:"flux-2", nokey:true },
   custom:     { name:"Anders (zelf invullen)", base:"", style:"edits", model:"" }
 };
 const STYLES = { edits:"Foto bewerken (/images/edits)", chat:"Chat met plaatje terug (/chat/completions)", mistral:"Mistral agent (image_generation)" };
@@ -301,7 +302,7 @@ let aiLog = [];
 const errText = j => { for (const v of [j.error?.message, j.error, j.message, j.detail?.[0]?.msg, j.detail]) if (v) return typeof v==="string" ? v : JSON.stringify(v);
   return ""; };
 async function api(path, opts={}){
-  const headers = { Authorization:`Bearer ${aiKey()}`, ...(opts.json ? { "Content-Type":"application/json" } : {}) };
+  const headers = { ...(aiKey() ? { Authorization:`Bearer ${aiKey()}` } : {}), ...(opts.json ? { "Content-Type":"application/json" } : {}) };
   const method = opts.method || (opts.body||opts.json ? "POST" : "GET");
   let r;
   try{ r = await fetch(apiUrl(path), { method, headers, body: opts.json ? JSON.stringify(opts.json) : opts.body }); }
@@ -784,7 +785,10 @@ function renderSetup(){
     <div><label class="lbl" for="ai-style">Soort API</label>
       <select id="ai-style">${Object.entries(STYLES).map(([k,l])=>`<option value="${k}" ${k===ai.style?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
     ${ai.style==="mistral" ? `<p class="muted" style="font-size:15px">Let op: Mistral kan een foto niet bewerken. Het model bekijkt de foto en tekent een nieuw plaatje, dus de gezichten lijken minder.</p>` : ""}
-    <div><label class="lbl" for="ai-key">API-sleutel</label><input type="password" id="ai-key" autocomplete="off" placeholder="sk-…" value="${esc(aiKey())}"></div>
+    ${PROVIDERS[ai.provider]?.nokey ? `<p class="muted" style="font-size:15px">Voor een eigen server met Flux 2 die “Foto bewerken” (OpenAI-stijl <code>/images/edits</code>) aanbiedt, bijv. een lokale OpenAI-compatibele image-server.
+      Pas het adres en de modelnaam aan naar jouw server. De foto verlaat je eigen netwerk niet. De server moet CORS toestaan voor dit spel.
+      Staat het spel op https (bijv. GitHub Pages), dan accepteert de browser alleen <code>http://localhost</code> of een https-adres, niet een http-adres van een ander apparaat.</p>` : ""}
+    <div><label class="lbl" for="ai-key">API-sleutel${PROVIDERS[ai.provider]?.nokey ? " (leeg laten als de server er geen nodig heeft)" : ""}</label><input type="password" id="ai-key" autocomplete="off" placeholder="sk-…" value="${esc(aiKey())}"></div>
     <div><label class="lbl" for="ai-model">Model</label>
       ${ai.models.length ? `<select id="ai-model">${(ai.models.some(m=>m.id===ai.model) ? [] : [{id:ai.model}]).concat(ai.models)
           .map(m=>`<option value="${esc(m.id)}" ${m.id===ai.model?"selected":""}>${m.img?"🖼 ":""}${esc(m.id)}</option>`).join("")}</select>`
@@ -856,7 +860,7 @@ function collectAi(){
   ai.model = document.getElementById("ai-model").value.trim();
   ai.prompt = document.getElementById("ai-prompt").value.trim() || AI_DEFAULT.prompt;
 }
-const aiReady = () => !!(aiKey() && ai.base && ai.model);
+const aiReady = () => !!((aiKey() || PROVIDERS[ai.provider]?.nokey) && ai.base && ai.model);
 const aiStatus = () => aiReady() ? `✓ Ingesteld: ${PROVIDERS[ai.provider]?.name || ai.base} · ${ai.model}. Wordt meteen bewaard.`
   : "Nog geen sleutel: “Maak er detectives van” bewerkt de foto op het apparaat zelf.";
 const aiMsg = t => { const m=document.getElementById("aiMsg"); if(m) m.textContent=t; };
