@@ -5,6 +5,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
 <title>Dossier Verdwenen Taart</title>
 <meta name="theme-color" content="#1f4047">
@@ -106,6 +108,8 @@ label.lbl{font-size:14px; font-weight:600; color:var(--ink-soft); display:block;
 .notes-list{font-family:var(--f-type); font-size:18px; display:flex; flex-direction:column; gap:8px}
 .notes-list div{background:var(--paper); padding:10px 12px; border-radius:4px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap}
 .notes-list b{letter-spacing:.15em; color:var(--stamp)}
+.fs-btn{position:fixed; left:max(12px, env(safe-area-inset-left,0px)); bottom:calc(10px + env(safe-area-inset-bottom,0px));
+  background:rgba(0,0,0,.25); color:#e6eef0; border:0; border-radius:20px; padding:8px 14px; font:600 13px var(--f-body); cursor:pointer}
 .parents{position:fixed; right:max(12px, env(safe-area-inset-right,0px)); bottom:calc(10px + env(safe-area-inset-bottom,0px));
   background:rgba(0,0,0,.25); color:#e6eef0; border:0; border-radius:20px; padding:8px 14px; font:600 13px var(--f-body); cursor:pointer}
 canvas#confetti{position:fixed; inset:0; pointer-events:none; z-index:30; width:100%; height:100%}
@@ -297,6 +301,17 @@ function confetti(){
   let t=0;(function f(){ctx.clearRect(0,0,W,H);ps.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.a+=p.va;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.a);ctx.fillStyle=p.c;ctx.fillRect(-p.r,-p.r/2,p.r*2,p.r);ctx.restore();});
     if(++t<240) requestAnimationFrame(f); else {ctx.clearRect(0,0,W,H); c.hidden=true;}})();
 }
+
+/* ---------- fullscreen ---------- */
+// Requested on the first tap (browsers only allow it from a tap) and re-requested on a later tap if something
+// like the camera picker kicked us out. iPhone Safari has no fullscreen API: there "Zet op beginscherm" is the way.
+const root = document.documentElement;
+const canFs = !!(root.requestFullscreen || root.webkitRequestFullscreen);
+const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const fsLabel = () => isFs() ? "Klein scherm" : "⛶ Volledig scherm";
+function goFull(){ try{ (root.requestFullscreen||root.webkitRequestFullscreen).call(root)?.catch?.(()=>{}); }catch(e){} }
+function exitFull(){ try{ (document.exitFullscreen||document.webkitExitFullscreen).call(document)?.catch?.(()=>{}); }catch(e){} }
+["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev, ()=>{ const b=document.querySelector(".fs-btn"); if(b) b.textContent=fsLabel(); }));
 
 /* ---------- wake lock ---------- */
 async function keepAwake(){ try{ if(navigator.wakeLock) await navigator.wakeLock.request("screen"); }catch(e){} }
@@ -533,7 +548,8 @@ function render(){
   else if (prog.phase==="accuse") html = renderAccuse();
   else if (prog.phase==="solved") html = renderSolved();
   else html = renderStart();
-  if (!ui.view) html += `<button class="parents" data-act="openSetup">Ouders</button>`;
+  if (!ui.view) html += `<button class="parents" data-act="openSetup">Ouders</button>`
+    + (canFs ? `<button class="fs-btn" data-act="fullscreen">${fsLabel()}</button>` : "");
   if (ui.overlay) html += ui.overlay;
   app.innerHTML = html;
   const ci = document.getElementById("code");
@@ -585,8 +601,11 @@ function solveStep(){
 
 /* ---------- events ---------- */
 app.addEventListener("click", async e=>{
-  const b = e.target.closest("[data-act]"); if(!b) return;
-  const act=b.dataset.act, i=+b.dataset.i, sub=prog.sub;
+  const b = e.target.closest("[data-act]"), act = b?.dataset.act;
+  if(act==="begin" || act==="resume") ui.wantFs = true;
+  if(ui.wantFs && canFs && !isFs() && act!=="fullscreen" && !e.target.closest("label")) goFull();
+  if(!b) return;
+  const i=+b.dataset.i, sub=prog.sub;
   ui.msg="";
   switch(act){
     case "begin": case "restart":
@@ -638,6 +657,7 @@ app.addEventListener("click", async e=>{
       else { prog.wrongSuspects.push(k); saveProg(); beep(false); ui.msg="Nee hoor! Kijk nog eens goed naar de bewijsstukken."; render(); }
       break; }
     case "party": beep(true); confetti(); break;
+    case "fullscreen": ui.wantFs = !isFs(); ui.wantFs ? goFull() : exitFull(); break;
     case "openSetup": ui.view = ui.setupUnlocked ? "setup" : "gate"; ui.gateQ=null; render(); scrollTo(0,0); break;
     case "back": ui.view=null; render(); scrollTo(0,0); break;
     case "add": collectSetup(); cfg.steps.push({type:"code",clue:"",place:"",code:"",hint:"",evidence:""}); render(); break;

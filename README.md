@@ -10,6 +10,7 @@ Installable, offline version of "De Verdwenen Verjaardagstaart".
 
 ## Install on the tablet
 Open the URL → Safari: Share → "Zet op beginscherm"; Chrome/Android: menu → "App installeren".
+The game goes fullscreen when the kids tap "Start het onderzoek" (and via the ⛶ button bottom-left). iPhone Safari has no fullscreen for web pages: add it to the home screen there to hide the browser bars. iPad and Android support it.
 
 ## Setup
 Tap "Ouders" (bottom right), answer the sum, edit spots/riddles/codes/suspects, Save.
