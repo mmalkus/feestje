@@ -553,6 +553,16 @@ function album(){
     <p class="muted" style="font-size:14px">Houd een foto ingedrukt om hem te bewaren.</p></div>` : "";
 }
 
+// Parent menu: every photo of the current game (also originals and a photo that isn't in the album yet), with a save link.
+function gamePhotos(){
+  const ids = [...new Set([...prog.photos.flatMap(p=>[p.id,p.orig]), prog.sub.photo, prog.sub.styled])].filter(id=>id && imgs.has(id));
+  if (!ids.length) return "";
+  return `<h2 style="font-size:20px;margin-top:8px">Foto's van dit spel</h2>
+    <p class="muted" style="font-size:16px">Bewaar de foto's voordat je het spel terug naar het begin zet: dan worden ze gewist.</p>
+    <div class="album">${ids.map((id,n)=>`<div class="stack" style="gap:6px"><img src="${imgs.get(id)}" alt="Foto ${n+1}">
+      <a class="btn alt small" href="${imgs.get(id)}" download="speurtocht-foto-${n+1}.jpg">⬇ Bewaar</a></div>`).join("")}</div>`;
+}
+
 function renderStart(){
   const resume = prog.phase !== "start" && (prog.index>0 || prog.phase!=="clue");
   return folder("DOSSIER #8 · STRENG GEHEIM", `
@@ -799,6 +809,7 @@ function renderSetup(){
       <button class="btn alt small" data-act="copyJson">Kopieer</button>
       <button class="btn alt small" data-act="importJson">Gebruik geplakte tekst</button>
     </div>
+    ${gamePhotos()}
     <p class="msg" id="setupMsg" aria-live="polite">${esc(ui.msg)}</p>
     <div class="row">
       <button class="btn alt small" data-act="resetProg">Spel terug naar begin</button>
