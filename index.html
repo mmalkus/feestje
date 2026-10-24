@@ -342,11 +342,11 @@ async function aiDraw(id){
   } else if (ai.style === "mistral"){
     // Mistral can't edit a photo: the agent looks at it and draws a new picture with its image_generation tool.
     const agent = async fresh => {
-      if (fresh || !ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base || ai.agent.key!==aiKey().slice(-6)){
+      if (fresh || !ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base || ai.agent.key!==aiKey().slice(-6) || ai.agent.v!==2){
         const a = await api("/agents", { json:{ model:ai.model, name:"Speurtocht tekenaar", description:"Maakt detective-plaatjes van teamfoto's",
-          instructions:"You are an illustrator. Look carefully at the attached photo (number of people, hair, clothes, poses) and ALWAYS use the image generation tool to draw the requested picture of these people.",
+          instructions:"You are an illustrator. Look carefully at the attached photo (number of people, hair, clothes, poses). Then you MUST call the image_generation tool to draw the requested picture of these people. Never answer with only text and never describe an image you did not generate. After the tool has made the picture, reply with one short sentence.",
           tools:[{ type:"image_generation" }] } });
-        ai.agent = { id:a.id, model:ai.model, base:ai.base, key:aiKey().slice(-6) }; save(KEY_AI, ai);
+        ai.agent = { id:a.id, model:ai.model, base:ai.base, key:aiKey().slice(-6), v:2 }; save(KEY_AI, ai);
       }
       return ai.agent.id;
     };
@@ -360,7 +360,17 @@ async function aiDraw(id){
       else if (e.status===400 || e.status===422) j = await ask(await agent(false), false); // model can't take the photo: draw from the prompt only
       else throw e;
     }
-    const file = (j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[]).find(c=>c.type==="tool_file" && c.file_id);
+    // The file chunk can sit anywhere in the outputs; look everywhere, and log what came back.
+    const findFile = o => { if (!o || typeof o!=="object") return null; if (typeof o.file_id==="string" && (!o.type || o.type==="tool_file")) return o;
+      for (const v of Object.values(o)){ const f = findFile(v); if (f) return f; } return null; };
+    const shape = r => (r.outputs||[]).map(o=>`${o.type||"?"}${o.name?`(${o.name})`:""}${Array.isArray(o.content)?`[${o.content.map(c=>c.type).join(",")}]`:""}`).join(" ") || "leeg";
+    aiLog.push(`antwoord: ${shape(j)}`);
+    let file = findFile(j.outputs);
+    if (!file && j.conversation_id){ // the model only talked about a picture: ask it to really draw it
+      const k = await api(`/conversations/${j.conversation_id}`, { json:{ stream:false,
+        inputs:"You did not call the image_generation tool. Call it now to actually create this picture." } });
+      aiLog.push(`antwoord: ${shape(k)}`); file = findFile(k.outputs); j = k;
+    }
     if (file){
       try{ out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob(); }
       catch(e){ // fall back to a signed download link
@@ -369,7 +379,8 @@ async function aiDraw(id){
         catch(_){ aiLog.push("GET (download-link) → geen antwoord"); throw e; }
       }
     }
-    else throw new Error(((j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[{text:o.content}]).map(c=>c.text||"").join(" ").trim().slice(0,120)) || "Mistral maakte geen plaatje");
+    else { const said = (j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[{text:o.content}]).map(c=>typeof c.text==="string"?c.text:"").join(" ").trim();
+      throw new Error(`Mistral gaf alleen tekst terug en geen plaatje${said ? `: “${said.slice(0,100)}…”` : "."}`); }
   } else {
     const send = extra => {
       const f = new FormData();
