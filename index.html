@@ -167,8 +167,18 @@ const DEFAULT = {
     { type: "code", clue: "Ik draai en draai en draai,\nmaar ik word nooit duizelig.\nIk maak jullie kleren weer schoon!", place: "Bij de wasmachine", code: "TAART", hint: "Kijk waar de vuile was naartoe gaat.", evidence: "Op de wasmachine ligt een bril met chocola op het glas. Wie draagt er een bril én een stropdas?" }
   ]
 };
+/* Image providers. style: "edits" = OpenAI-style /images/edits (photo in, edited photo out);
+   "chat" = /chat/completions with image output (OpenRouter, Gemini image models);
+   "mistral" = Mistral agent with the image_generation tool (draws a new picture from a description of the photo). */
+const PROVIDERS = {
+  openai:     { name:"OpenAI",     base:"https://api.openai.com/v1",    style:"edits",   model:"gpt-image-1" },
+  openrouter: { name:"OpenRouter", base:"https://openrouter.ai/api/v1", style:"chat",    model:"google/gemini-2.5-flash-image" },
+  mistral:    { name:"Mistral",    base:"https://api.mistral.ai/v1",    style:"mistral", model:"mistral-medium-latest" },
+  custom:     { name:"Anders (zelf invullen)", base:"", style:"edits", model:"" }
+};
+const STYLES = { edits:"Foto bewerken (/images/edits)", chat:"Chat met plaatje terug (/chat/completions)", mistral:"Mistral agent (image_generation)" };
 const AI_DEFAULT = {
-  key: "", model: "gpt-image-1",
+  provider: "openai", keys: {}, base: PROVIDERS.openai.base, style: "edits", model: "gpt-image-1", models: [],
   prompt: "Turn this photo into a bright, friendly children's picture-book illustration in which everyone is a detective: deerstalker hats, magnifying glasses, little trench coats, a playful mystery atmosphere with a birthday cake hidden somewhere. Keep exactly the same people, their faces, hair, poses and the number of people. Cheerful, warm, kid-friendly, no text."
 };
 
@@ -180,7 +190,20 @@ let cfg = load(KEY_CFG, null) || structuredClone(DEFAULT);
 let prog = load(KEY_PROG, null) || { team:"", index:0, phase:"start", wrongSuspects:[] };
 prog.sub = prog.sub || {}; prog.photos = prog.photos || [];
 let ai = Object.assign({}, AI_DEFAULT, load(KEY_AI, {}));
-let ui = { hintShown:false, overlay:null, setupUnlocked:false, gateQ:null, msg:"", zoom:0, busy:"" };
+if (ai.key){ ai.keys = { ...ai.keys, openai: ai.keys.openai || ai.key }; delete ai.key; } // settings from the first version
+const aiKey = () => (ai.keys[ai.provider] || "").trim();
+let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0 };
+
+/* ---------- parents' lock: a sum or a PIN; asked every time the menu opens ---------- */
+const KEY_LOCK = "speurtocht.lock.v1";
+let lock = load(KEY_LOCK, { mode:"math" }); // { mode:"math"|"pin", salt, hash }
+async function hashPin(pin, salt){
+  const data = `${salt}:${pin}`;
+  if (crypto.subtle){ const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data)); return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join(""); }
+  let h = 0; for (const c of data) h = (h*31 + c.charCodeAt(0)) | 0; return "w" + h; // plain http on a LAN: no WebCrypto
+}
+// Two-digit × two-digit (e.g. 12 × 45): fine for a parent, too hard for the kids. Also the PIN recovery question.
+const hardSum = () => { const r = () => 11 + (Math.random()*89|0); let a, b; do { a = r(); b = r(); } while (a%10===0 || b%10===0); return { a, b }; };
 
 const app = document.getElementById("app");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -253,25 +276,68 @@ async function localDetective(id){
   x.restore();
   return keepBlob(await toBlob(c), "k-");
 }
-// Optional: image-edit API with the parent's own key (stored only on this device).
+// Optional: an image API with the parent's own key (stored only on this device).
+const blobToDataUrl = blob => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); });
+const b64ToBlob = (b64, type="image/png") => { const bin=atob(b64), u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return new Blob([u8],{type}); };
+const apiUrl = path => ai.base.trim().replace(/\/+$/,"") + path;
+async function api(path, opts={}){
+  const headers = { Authorization:`Bearer ${aiKey()}`, ...(opts.json ? { "Content-Type":"application/json" } : {}) };
+  let r;
+  try{ r = await fetch(apiUrl(path), { method: opts.method || (opts.body||opts.json ? "POST" : "GET"), headers, body: opts.json ? JSON.stringify(opts.json) : opts.body }); }
+  catch(e){ throw new Error("Geen verbinding met de server (of de server staat geen apps in de browser toe)."); }
+  if (opts.raw && r.ok) return r;
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw Object.assign(new Error(j.error?.message || j.message || j.detail?.[0]?.msg || (typeof j.detail==="string" && j.detail) || `HTTP ${r.status}`), { status:r.status });
+  return j;
+}
+async function fetchModels(){
+  const j = await api("/models"), list = Array.isArray(j) ? j : (j.data || j.models || []);
+  const isImg = m => (m.architecture?.output_modalities||[]).includes("image") || /image|dall-e|flux|imagen|stable-diffusion|sdxl/i.test(m.id);
+  return list.filter(m=>m && m.id).map(m=>({ id:m.id, img:isImg(m) }))
+    .sort((a,b)=> (b.img-a.img) || a.id.localeCompare(b.id));
+}
 async function aiDetective(id){
-  const blob = await (await fetch(imgs.get(id))).blob();
-  const send = async extra => {
-    const f = new FormData();
-    f.append("model", ai.model||AI_DEFAULT.model); f.append("prompt", ai.prompt||AI_DEFAULT.prompt);
-    f.append("image", blob, "foto.jpg"); f.append("size","auto"); f.append("quality","medium");
-    if(extra) f.append("input_fidelity","high");
-    const r = await fetch("https://api.openai.com/v1/images/edits", { method:"POST", headers:{ Authorization:`Bearer ${ai.key.trim()}` }, body:f });
-    const j = await r.json().catch(()=>({}));
-    if(!r.ok) throw Object.assign(new Error(j.error?.message || `HTTP ${r.status}`), { status:r.status });
-    return j;
-  };
-  let j;
-  try{ j = await send(true); }
-  catch(e){ if(e.status!==400) throw e; j = await send(false); } // older models don't know input_fidelity
-  const b64 = j.data?.[0]?.b64_json; if(!b64) throw new Error("Geen plaatje ontvangen");
-  const bin = atob(b64), u8 = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
-  return keepBlob(new Blob([u8], { type:"image/png" }), "k-");
+  const blob = await (await fetch(imgs.get(id))).blob(), prompt = ai.prompt || AI_DEFAULT.prompt;
+  const toImage = async url => (await fetch(url)).blob();
+  let out;
+  if (ai.style === "chat"){
+    const j = await api("/chat/completions", { json:{ model:ai.model, modalities:["image","text"], messages:[{ role:"user", content:[
+      { type:"text", text:prompt }, { type:"image_url", image_url:{ url: await blobToDataUrl(blob) } } ] }] } });
+    const msg = j.choices?.[0]?.message || {};
+    const parts = Array.isArray(msg.content) ? msg.content : [];
+    const url = msg.images?.[0]?.image_url?.url || parts.find(c=>c.type==="image_url")?.image_url?.url
+      || (typeof msg.content==="string" && msg.content.match(/data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+/)?.[0]);
+    const b64 = parts.find(c=>c.inline_data||c.b64_json); // other providers' variants
+    if (url) out = await toImage(url);
+    else if (b64) out = b64ToBlob(b64.inline_data?.data || b64.b64_json);
+  } else if (ai.style === "mistral"){
+    // Mistral can't edit a photo: the agent looks at it and draws a new picture with its image_generation tool.
+    if (!ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base){
+      const a = await api("/agents", { json:{ model:ai.model, name:"Speurtocht tekenaar", description:"Maakt detective-plaatjes van teamfoto's",
+        instructions:"You are an illustrator. Look carefully at the attached photo (number of people, hair, clothes, poses) and ALWAYS use the image generation tool to draw the requested picture of these people.",
+        tools:[{ type:"image_generation" }] } });
+      ai.agent = { id:a.id, model:ai.model, base:ai.base }; save(KEY_AI, ai);
+    }
+    const j = await api("/conversations", { json:{ agent_id:ai.agent.id, stream:false, inputs:[{ role:"user", content:[
+      { type:"text", text:prompt }, { type:"image_url", image_url: await blobToDataUrl(blob) } ] }] } });
+    const file = (j.outputs||[]).flatMap(o=>Array.isArray(o.content)?o.content:[]).find(c=>c.type==="tool_file" && c.file_id);
+    if (file) out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob();
+  } else {
+    const send = extra => {
+      const f = new FormData();
+      f.append("model", ai.model); f.append("prompt", prompt); f.append("image", blob, "foto.jpg");
+      if (/gpt-image/.test(ai.model)){ f.append("size","auto"); f.append("quality","medium"); }
+      if (extra) f.append("input_fidelity","high");
+      return api("/images/edits", { body:f });
+    };
+    let j;
+    try{ j = await send(/gpt-image/.test(ai.model)); }
+    catch(e){ if(e.status!==400 || !/gpt-image/.test(ai.model)) throw e; j = await send(false); } // older models don't know input_fidelity
+    const d = j.data?.[0] || {};
+    if (d.b64_json) out = b64ToBlob(d.b64_json); else if (d.url) out = await toImage(d.url);
+  }
+  if (!out) throw new Error("Geen plaatje ontvangen");
+  return keepBlob(out, "k-");
 }
 
 /* ---------- sound ---------- */
@@ -314,7 +380,15 @@ function exitFull(){ try{ (document.exitFullscreen||document.webkitExitFullscree
 ["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev, ()=>{ const b=document.querySelector(".fs-btn"); if(b) b.textContent=fsLabel(); }));
 
 /* ---------- wake lock ---------- */
-async function keepAwake(){ try{ if(navigator.wakeLock) await navigator.wakeLock.request("screen"); }catch(e){} }
+// The lock is dropped whenever the page is hidden, so it's re-requested on return and on any tap (some browsers need one).
+let wakeLock = null;
+async function keepAwake(){
+  if (!navigator.wakeLock || (wakeLock && !wakeLock.released) || document.visibilityState!=="visible") return;
+  try{ wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
+}
+document.addEventListener("visibilitychange", keepAwake);
+document.addEventListener("pointerdown", keepAwake, true);
+keepAwake();
 
 /* ---------- screens ---------- */
 function folder(tab, inner){ return `<div class="folder"><span class="tab-label">${esc(tab)}</span><div class="stack">${inner}</div></div>`; }
@@ -451,17 +525,39 @@ function renderSolved(){
 
 /* ---------- parent setup ---------- */
 function renderGate(){
-  if(!ui.gateQ){ const a=6+(Math.random()*6|0), b=6+(Math.random()*4|0); ui.gateQ={a,b}; }
+  const pin = lock.mode==="pin" && lock.hash && !ui.recover;
+  if(!pin && !ui.gateQ) ui.gateQ = hardSum();
   return folder("ALLEEN VOOR OUDERS", `
     <h2>Instellingen</h2>
-    <p>Om de instellingen te openen: hoeveel is ${ui.gateQ.a} × ${ui.gateQ.b}?</p>
-    <form id="gateForm" class="stack" style="gap:10px">
-      <input type="text" id="gate" inputmode="numeric" class="code-input" placeholder="?">
+    <p>${pin ? "Typ de pincode om de instellingen te openen."
+      : `${ui.recover ? "Pincode vergeten? Los deze som op om toch binnen te komen. " : "Om de instellingen te openen: "}hoeveel is ${ui.gateQ.a} × ${ui.gateQ.b}?`}</p>
+    <form id="gateForm" class="stack" style="gap:10px" autocomplete="off">
+      <input type="${pin?"password":"text"}" id="gate" inputmode="numeric" class="code-input" placeholder="${pin?"PINCODE":"?"}" autocomplete="off">
       <button class="btn" type="submit">Open</button>
       <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>
     </form>
+    ${pin ? `<button class="btn ghost" data-act="forgotPin">Pincode vergeten?</button>` : ""}
     <button class="btn ghost" data-act="back">Terug naar het spel</button>
   `);
+}
+
+function lockEditor(){
+  const mode = ui.lockDraft || lock.mode;
+  return `
+    <h2 style="font-size:20px;margin-top:8px">Toegang tot dit menu</h2>
+    ${ui.recovered ? `<p class="hint-box">Je bent binnengekomen met de reservesom. Kies hieronder een nieuwe pincode.</p>` : ""}
+    <div><label class="lbl" for="lock-mode">Beveiliging (wordt elke keer gevraagd)</label>
+      <select id="lock-mode">
+        <option value="math" ${mode==="math"?"selected":""}>Rekensom (bijv. 12 × 45)</option>
+        <option value="pin" ${mode==="pin"?"selected":""}>Pincode</option>
+      </select></div>
+    ${mode==="pin" ? `<div class="row">
+        <div><label class="lbl" for="pin1">${lock.hash?"Nieuwe pincode (leeg = niet wijzigen)":"Pincode (4 tot 8 cijfers)"}</label><input type="password" id="pin1" inputmode="numeric" autocomplete="new-password" maxlength="8"></div>
+        <div><label class="lbl" for="pin2">Nog een keer</label><input type="password" id="pin2" inputmode="numeric" autocomplete="new-password" maxlength="8"></div>
+      </div>
+      <p class="muted" style="font-size:15px">Vergeten? Dan kom je binnen met een moeilijke rekensom (2 cijfers × 2 cijfers).</p>` : ""}
+    <button class="btn alt small" data-act="saveLock">Beveiliging opslaan</button>
+    <p class="msg" id="lockMsg" aria-live="polite"></p>`;
 }
 
 function stepEditor(s, i){
@@ -503,6 +599,7 @@ function renderSetup(){
     <p class="muted" style="font-size:16px">Alles wordt bewaard op dít apparaat. Stel het dus in op de telefoon of tablet waarmee de kinderen spelen.</p>
     <div><label class="lbl" for="s-title">Titel</label><input type="text" id="s-title" value="${esc(cfg.title)}"></div>
     <div><label class="lbl" for="s-story">Verhaal op het startscherm</label><textarea id="s-story">${esc(cfg.story)}</textarea></div>
+    ${lockEditor()}
     <h2 style="font-size:20px;margin-top:8px">Opdrachten</h2>
     <p class="muted" style="font-size:16px"><b>Raadsel + briefje</b>: zoek de plek, typ de code. <b>Waar is dit?</b>: een ingezoomde foto van de plek. <b>Fotopuzzel</b>: puzzel de foto van de plek in elkaar.
       <b>Letterpuzzel</b>: zet de letters van een woord op volgorde. <b>Foto-opdracht</b>: de kinderen maken zelf een foto; die komt in het fotoalbum aan het eind.</p>
@@ -515,10 +612,25 @@ function renderSetup(){
     <div><label class="lbl" for="s-final">Waar ligt de taart / traktatie echt?</label><input type="text" id="s-final" value="${esc(cfg.finalHide)}"></div>
     <h2 style="font-size:20px;margin-top:8px">Detective-foto's met AI (optioneel)</h2>
     <p class="muted" style="font-size:16px">Zonder sleutel maakt “Maak er detectives van” een detective-dossierfoto op het apparaat zelf.
-      Met een OpenAI API-sleutel wordt de foto een getekend detective-plaatje (kost een paar cent per foto, duurt ±1 minuut, en de foto wordt naar OpenAI gestuurd).
+      Met een API-sleutel wordt de foto een getekend detective-plaatje (kost een paar cent per foto, duurt ±1 minuut, en de foto wordt naar die dienst gestuurd).
       De sleutel blijft alleen op dit apparaat. Gebruik een aparte sleutel met een bestedingslimiet.</p>
-    <div><label class="lbl" for="ai-key">OpenAI API-sleutel</label><input type="password" id="ai-key" autocomplete="off" placeholder="sk-…" value="${esc(ai.key)}"></div>
-    <div><label class="lbl" for="ai-model">Model</label><input type="text" id="ai-model" value="${esc(ai.model)}"></div>
+    <div><label class="lbl" for="ai-provider">Dienst</label>
+      <select id="ai-provider">${Object.entries(PROVIDERS).map(([k,p])=>`<option value="${k}" ${k===ai.provider?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+    <div><label class="lbl" for="ai-base">Adres (endpoint)</label><input type="text" id="ai-base" inputmode="url" spellcheck="false" placeholder="https://…/v1" value="${esc(ai.base)}"></div>
+    <div><label class="lbl" for="ai-style">Soort API</label>
+      <select id="ai-style">${Object.entries(STYLES).map(([k,l])=>`<option value="${k}" ${k===ai.style?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
+    ${ai.style==="mistral" ? `<p class="muted" style="font-size:15px">Let op: Mistral kan een foto niet bewerken. Het model bekijkt de foto en tekent een nieuw plaatje, dus de gezichten lijken minder.</p>` : ""}
+    <div><label class="lbl" for="ai-key">API-sleutel</label><input type="password" id="ai-key" autocomplete="off" placeholder="sk-…" value="${esc(aiKey())}"></div>
+    <div><label class="lbl" for="ai-model">Model</label>
+      ${ai.models.length ? `<select id="ai-model">${(ai.models.some(m=>m.id===ai.model) ? [] : [{id:ai.model}]).concat(ai.models)
+          .map(m=>`<option value="${esc(m.id)}" ${m.id===ai.model?"selected":""}>${m.img?"🖼 ":""}${esc(m.id)}</option>`).join("")}</select>`
+        : `<input type="text" id="ai-model" spellcheck="false" value="${esc(ai.model)}">`}</div>
+    <div class="row">
+      <button class="btn alt small" data-act="loadModels">Modellen ophalen</button>
+      ${ai.models.length ? `<button class="btn alt small" data-act="typeModel">Zelf een model typen</button>` : ""}
+    </div>
+    <p class="muted" style="font-size:14px">🖼 = maakt plaatjes${ai.style==="mistral" ? " (voor Mistral kies je juist een gewoon chatmodel, bijv. mistral-medium-latest)" : ""}.</p>
+    <p class="msg" id="aiMsg" aria-live="polite"></p>
     <div><label class="lbl" for="ai-prompt">Opdracht aan de AI</label><textarea id="ai-prompt" style="min-height:120px">${esc(ai.prompt)}</textarea></div>
     <button class="btn" data-act="saveSetup">Opslaan</button>
     <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
@@ -567,9 +679,17 @@ function collectSetup(){
   cfg.suspects = sus.length>=2 ? sus : cfg.suspects;
   cfg.culpritIndex = Math.min(+document.getElementById("s-culprit").value||0, cfg.suspects.length-1);
   cfg.finalHide = document.getElementById("s-final").value.trim();
-  ai = { key:document.getElementById("ai-key").value.trim(), model:document.getElementById("ai-model").value.trim()||AI_DEFAULT.model,
-    prompt:document.getElementById("ai-prompt").value.trim()||AI_DEFAULT.prompt };
+  collectAi();
 }
+
+function collectAi(){
+  ai.keys = { ...ai.keys, [ai.provider]: document.getElementById("ai-key").value.trim() };
+  ai.base = document.getElementById("ai-base").value.trim();
+  ai.style = document.getElementById("ai-style").value;
+  ai.model = document.getElementById("ai-model").value.trim();
+  ai.prompt = document.getElementById("ai-prompt").value.trim() || AI_DEFAULT.prompt;
+}
+const aiMsg = t => { const m=document.getElementById("aiMsg"); if(m) m.textContent=t; };
 
 function stepProblem(s){
   const t = s.type||"code";
@@ -635,7 +755,7 @@ app.addEventListener("click", async e=>{
       saveProg(); render(); break; }
     case "unletter": sub.picked=(sub.picked||[]).slice(0,-1); saveProg(); render(); break;
     case "detectify": {
-      const useAi = !!ai.key;
+      const useAi = !!aiKey() && !!ai.base && !!ai.model;
       ui.busy = useAi ? "De tekenaar van het detectivebureau is aan het werk… dit duurt ongeveer een minuut." : "Even ontwikkelen…";
       render();
       try{ sub.styled = useAi ? await aiDetective(sub.photo) : await localDetective(sub.photo); }
@@ -657,9 +777,28 @@ app.addEventListener("click", async e=>{
       else { prog.wrongSuspects.push(k); saveProg(); beep(false); ui.msg="Nee hoor! Kijk nog eens goed naar de bewijsstukken."; render(); }
       break; }
     case "party": beep(true); confetti(); break;
+    case "loadModels":
+      collectAi(); if(!ai.base) return aiMsg("Vul eerst het adres in."); aiMsg("Modellen ophalen…");
+      try{ const ms = await fetchModels(); if(!ms.length) throw new Error("Geen modellen gevonden");
+        ai.models = ms; save(KEY_AI, ai); collectSetup(); render(); aiMsg(`${ms.length} modellen gevonden.`); }
+      catch(err){ aiMsg(`Ophalen lukte niet: ${err.message}`); }
+      break;
+    case "typeModel": collectSetup(); ai.models=[]; render(); document.getElementById("ai-model")?.focus(); break;
     case "fullscreen": ui.wantFs = !isFs(); ui.wantFs ? goFull() : exitFull(); break;
-    case "openSetup": ui.view = ui.setupUnlocked ? "setup" : "gate"; ui.gateQ=null; render(); scrollTo(0,0); break;
-    case "back": ui.view=null; render(); scrollTo(0,0); break;
+    case "openSetup": ui.view="gate"; ui.gateQ=null; ui.recover=false; render(); scrollTo(0,0); document.getElementById("gate")?.focus(); break;
+    case "back": ui.view=null; ui.recover=false; ui.recovered=false; ui.lockDraft=null; render(); scrollTo(0,0); break;
+    case "forgotPin": ui.recover=true; ui.gateQ=null; render(); break;
+    case "saveLock": {
+      const mode=document.getElementById("lock-mode").value, msg=t=>{ const m=document.getElementById("lockMsg"); if(m) m.textContent=t; };
+      if(mode==="math"){ lock={ mode:"math" }; save(KEY_LOCK, lock); ui.lockDraft=null; return msg("Opgeslagen: er wordt een rekensom gevraagd."); }
+      const p1=document.getElementById("pin1").value.trim(), p2=document.getElementById("pin2").value.trim();
+      if(!p1 && !p2 && lock.mode==="pin" && lock.hash) return msg("De pincode blijft hetzelfde.");
+      if(!/^\d{4,8}$/.test(p1)) return msg("Kies een pincode van 4 tot 8 cijfers.");
+      if(p1!==p2) return msg("De twee pincodes zijn niet hetzelfde.");
+      const salt=Math.random().toString(36).slice(2);
+      lock={ mode:"pin", salt, hash: await hashPin(p1, salt) }; save(KEY_LOCK, lock); ui.lockDraft=null; ui.recovered=false;
+      document.getElementById("pin1").value=document.getElementById("pin2").value="";
+      msg("Pincode opgeslagen. Die wordt voortaan elke keer gevraagd."); break; }
     case "add": collectSetup(); cfg.steps.push({type:"code",clue:"",place:"",code:"",hint:"",evidence:""}); render(); break;
     case "del": collectSetup(); if(cfg.steps.length>1){ cfg.steps.splice(i,1); } render(); break;
     case "up": case "down": { collectSetup(); const j = act==="up"?i-1:i+1; [cfg.steps[i],cfg.steps[j]]=[cfg.steps[j],cfg.steps[i]]; render(); break; }
@@ -690,7 +829,14 @@ app.addEventListener("click", async e=>{
 
 app.addEventListener("change", async e=>{
   const t=e.target;
-  if(t.matches('select[data-f="type"]')){ collectSetup(); render(); return; }
+  if(t.matches('select[data-f="type"]') || t.id==="ai-style"){ collectSetup(); render(); return; }
+  if(t.id==="lock-mode"){ collectSetup(); ui.lockDraft=t.value; render(); document.getElementById("lock-mode")?.scrollIntoView({block:"center"}); return; }
+  if(t.id==="ai-provider"){
+    collectSetup(); const p = PROVIDERS[t.value];
+    ai.provider = t.value; ai.models = [];
+    if (t.value!=="custom"){ ai.base = p.base; ai.style = p.style; ai.model = p.model; }
+    render(); return;
+  }
   if(t.dataset.photo!==undefined && t.files[0]){
     collectSetup(); setupMsg("Foto wordt verwerkt…");
     try{ cfg.steps[+t.dataset.photo].photo = await storeImage(t.files[0], "p-", true); ui.msg=""; render(); }
@@ -718,17 +864,22 @@ app.addEventListener("submit", e=>{
       input.select();
     }
   }
-  if(e.target.id==="gateForm"){
-    if(+document.getElementById("gate").value === ui.gateQ.a*ui.gateQ.b){ ui.setupUnlocked=true; ui.view="setup"; ui.msg=""; render(); scrollTo(0,0); }
-    else { ui.msg="Dat is niet goed."; ui.gateQ=null; render(); }
-  }
+  if(e.target.id==="gateForm") (async()=>{
+    const val=document.getElementById("gate").value.trim(), pin = lock.mode==="pin" && lock.hash && !ui.recover;
+    if(Date.now() < ui.lockUntil){ ui.msg=`Te vaak fout. Wacht ${Math.ceil((ui.lockUntil-Date.now())/1000)} seconden.`; return render(); }
+    const ok = pin ? (await hashPin(val, lock.salt)) === lock.hash : val!=="" && +val === ui.gateQ.a*ui.gateQ.b;
+    if(ok){ ui.fails=0; ui.recovered=ui.recover; ui.recover=false; ui.view="setup"; ui.msg=""; render(); scrollTo(0,0); }
+    else {
+      if(++ui.fails % 5 === 0) ui.lockUntil = Date.now() + 30000;
+      ui.msg = pin ? "Die pincode klopt niet." : "Dat is niet goed. Hier is een nieuwe som."; ui.gateQ=null; render();
+    }
+  })();
 });
 
 app.addEventListener("input", e=>{ if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); } });
 
-window.claude?.hot?.snapshot?.(()=>({ ui:{view:ui.view, setupUnlocked:ui.setupUnlocked} }));
+window.claude?.hot?.snapshot?.(()=>({ ui:{} })); // never restore an unlocked menu
 function start(data){
-  if(data && data.ui){ ui.view=data.ui.view||null; ui.setupUnlocked=!!data.ui.setupUnlocked; }
   DB.all().then(m=>m.forEach((blob,k)=>imgs.set(k, URL.createObjectURL(blob)))).catch(()=>{}).finally(render);
 }
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
