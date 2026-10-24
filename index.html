@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="nl"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+<title>Dossier Verdwenen Taart</title>
+<meta name="theme-color" content="#1f4047">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Lexend:wght@400;600;800&family=Special+Elite&display=swap">
+<style>
+/* Layout: one manila case-file folder lying on a blue-green desk; each screen is a page inside the folder */
+:root{
+  --desk:#1f4047; --desk-2:#163238; --folder:#e9d29c; --folder-edge:#cdb173;
+  --paper:#fdf8ea; --ink:#2b2420; --ink-soft:#6b5d4f; --stamp:#c42f28;
+  --tape:#f4d43c; --good:#2d8549; --line:#d9cba8;
+  --f-display:"Bungee", "Arial Black", Impact, sans-serif;
+  --f-body:"Lexend", "Trebuchet MS", system-ui, sans-serif;
+  --f-type:"Special Elite", "Courier New", ui-monospace, monospace;
+  color-scheme:light;
+}
+html,body{height:100%}
+body{
+  background:var(--desk);
+  background-image:radial-gradient(circle at 20% 10%, rgba(255,255,255,.06), transparent 50%),
+    repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 2px, transparent 2px 40px);
+  color:var(--ink); font-family:var(--f-body); font-size:18px; line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:16px 32px;
+  -webkit-tap-highlight-color:transparent;
+}
+#app{max-width:560px; margin:0 auto}
+.folder{
+  position:relative; background:var(--folder); border-radius:4px 14px 10px 10px;
+  box-shadow:0 2px 0 var(--folder-edge), 0 18px 40px rgba(0,0,0,.35);
+  padding:28px 20px 24px; margin-top:22px;
+}
+.folder::before{ /* folder tab */
+  content:""; position:absolute; top:-20px; left:0; width:42%; height:22px;
+  background:var(--folder); border-radius:10px 10px 0 0;
+}
+.tab-label{position:absolute; top:-15px; left:16px; font-family:var(--f-type); font-size:14px; color:var(--ink-soft); letter-spacing:.06em}
+.stack{display:flex; flex-direction:column; gap:16px}
+.stamp{
+  display:inline-block; font-family:var(--f-display); color:var(--stamp);
+  border:3px solid var(--stamp); border-radius:6px; padding:2px 10px; font-size:15px;
+  transform:rotate(-6deg); letter-spacing:.06em; opacity:.88; align-self:flex-start;
+}
+h1,h2{font-family:var(--f-display); font-weight:400; line-height:1.1; margin:0; text-wrap:balance}
+h1{font-size:clamp(28px, 8vw, 40px)}
+h2{font-size:clamp(22px, 6vw, 28px)}
+p{margin:0}
+.type{font-family:var(--f-type)}
+.muted{color:var(--ink-soft)}
+.paper{
+  background:var(--paper); border-radius:3px; padding:20px 18px;
+  box-shadow:0 1px 0 var(--line), 0 6px 14px rgba(60,40,10,.18);
+  background-image:repeating-linear-gradient(transparent 0 31px, rgba(80,120,180,.14) 31px 32px);
+  background-position:0 10px; position:relative;
+}
+.paper.tilt{transform:rotate(-.6deg)}
+.tape{position:absolute; top:-12px; left:50%; width:96px; height:24px; margin-left:-48px;
+  background:var(--tape); opacity:.85; transform:rotate(3deg); box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.riddle{font-size:22px; font-weight:600; line-height:1.45; white-space:pre-line}
+.btn{
+  appearance:none; border:0; border-radius:12px; min-height:56px; padding:12px 20px;
+  font:800 19px/1.2 var(--f-body); cursor:pointer; color:#fff; background:var(--stamp);
+  box-shadow:0 4px 0 #8e1f1a; transition:transform .08s;
+}
+.btn:active{transform:translateY(3px); box-shadow:0 1px 0 #8e1f1a}
+.btn.alt{background:var(--paper); color:var(--ink); box-shadow:0 4px 0 var(--folder-edge)}
+.btn.small{min-height:44px; font-size:16px; padding:8px 14px}
+.btn.ghost{background:transparent; color:var(--ink-soft); box-shadow:none; font-weight:600; min-height:44px; text-decoration:underline}
+.btn:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid var(--tape); outline-offset:2px}
+.row{display:flex; gap:10px; flex-wrap:wrap}
+.row > *{flex:1 1 140px}
+input[type=text],textarea,select{
+  width:100%; box-sizing:border-box; font:600 18px var(--f-body); color:var(--ink);
+  background:#fff; border:2px solid var(--folder-edge); border-radius:10px; padding:12px;
+}
+textarea{min-height:84px; resize:vertical; font-weight:400}
+.code-input{font-family:var(--f-type)!important; font-size:26px!important; text-align:center; letter-spacing:.2em; text-transform:uppercase}
+label.lbl{font-size:14px; font-weight:600; color:var(--ink-soft); display:block; margin-bottom:4px; letter-spacing:.03em}
+.progress{display:flex; gap:6px; align-items:center}
+.dot{flex:1; height:10px; border-radius:5px; background:rgba(43,36,32,.15)}
+.dot.done{background:var(--good)} .dot.now{background:var(--stamp)}
+.msg{min-height:1.5em; font-weight:600; text-align:center}
+.msg.bad{color:var(--stamp)}
+.shake{animation:shake .4s}
+@keyframes shake{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+.evidence{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px}
+.evidence li{background:var(--paper); border-left:6px solid var(--tape); padding:10px 12px; border-radius:3px; font-size:16px; display:flex; gap:10px}
+.evidence .nr{font-family:var(--f-type); color:var(--stamp); flex:none}
+.overlay{position:fixed; inset:0; background:rgba(15,30,34,.78); display:flex; align-items:center; justify-content:center;
+  padding:16px max(16px, env(safe-area-inset-right,0px)) 16px max(16px, env(safe-area-inset-left,0px)); z-index:20}
+.overlay .paper{max-width:480px; width:100%; animation:pop .35s ease-out}
+@keyframes pop{from{transform:scale(.85) rotate(-3deg); opacity:.4} to{transform:none; opacity:1}}
+.suspects{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px}
+.suspect{min-height:88px; background:var(--paper); color:var(--ink); border:3px dashed var(--folder-edge); border-radius:12px;
+  font:800 19px var(--f-body); cursor:pointer; padding:10px}
+.suspect.wrong{border-color:var(--stamp); opacity:.5; text-decoration:line-through}
+.step-edit{border:2px solid var(--folder-edge); border-radius:10px; padding:14px; background:rgba(255,255,255,.35)}
+.notes-list{font-family:var(--f-type); font-size:18px; display:flex; flex-direction:column; gap:8px}
+.notes-list div{background:var(--paper); padding:10px 12px; border-radius:4px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap}
+.notes-list b{letter-spacing:.15em; color:var(--stamp)}
+.parents{position:fixed; right:max(12px, env(safe-area-inset-right,0px)); bottom:calc(10px + env(safe-area-inset-bottom,0px));
+  background:rgba(0,0,0,.25); color:#e6eef0; border:0; border-radius:20px; padding:8px 14px; font:600 13px var(--f-body); cursor:pointer}
+canvas#confetti{position:fixed; inset:0; pointer-events:none; z-index:30; width:100%; height:100%}
+.hint-box{background:#fff7c2; border:2px dashed #d3b62a; border-radius:10px; padding:12px; font-size:17px}
+@media (prefers-reduced-motion: reduce){ *{animation:none!important; transition:none!important} }
+</style>
+
+</head><body>
+<div id="app"></div>
+<canvas id="confetti" hidden></canvas>
+
+<script>
+(function(){
+const DEFAULT = {
+  title: "De Verdwenen Verjaardagstaart",
+  story: "Vanochtend stond er een prachtige verjaardagstaart in de keuken. En nu… is hij WEG! Iemand heeft hem gestolen. Jullie zijn de beste detectives van het hele huis. Volg de aanwijzingen, vind de geheime codes en ontmasker de dader!",
+  culpritIndex: 0,
+  suspects: ["Papa", "Mama", "De kat", "Een stoute kabouter"],
+  finalHide: "In de oven (die staat UIT!) 🎂",
+  steps: [
+    { clue: "Binnen ben ik koud,\nmaar ik zorg goed voor jullie kaas en melk.\nKijk eens in mijn deur!", place: "Koelkastdeur", code: "SPOOR", hint: "Het staat in de keuken en het zoemt.", evidence: "Er zit slagroom op de deurklink van de keuken. De dader had dus grote handen…" },
+    { clue: "Ik heb vier poten, maar ik loop nooit.\nAls het eten klaar is, zit iedereen bij mij.\nKruip eens onder mij!", place: "Onder de eettafel", code: "LOEP", hint: "Hier eten jullie elke avond aan.", evidence: "Onder de tafel ligt een schoenafdruk. Maat 44! Dat is een hele grote voet." },
+    { clue: "Ik zit vol met verhalen,\nmaar praten kan ik niet.\nZoek tussen mijn bladzijden!", place: "Boekenkast", code: "VINGER", hint: "Je leest ze voor het slapengaan.", evidence: "In een boek zit een briefje: ‘Niet vergeten: taart verstoppen!’ Het handschrift is erg slordig." },
+    { clue: "Overdag sta ik bij de deur te wachten.\nIk ruik een beetje naar voeten.\nWie zoekt, die vindt!", place: "Schoenenrek", code: "SLEUTEL", hint: "Hier zet je je schoenen neer als je thuiskomt.", evidence: "In een grote schoen zitten taartkruimels. Chocola!" },
+    { clue: "Ik heb kussens, maar ik slaap nooit.\nWie op mij zit, kijkt vaak tv.\nVoel eens tussen mijn kussens!", place: "Tussen de kussens van de bank", code: "GEHEIM", hint: "Het is het zachtste meubel in de woonkamer.", evidence: "Tussen de kussens ligt een stropdas met een vlek van slagroom." },
+    { clue: "Ik draai en draai en draai,\nmaar ik word nooit duizelig.\nIk maak jullie kleren weer schoon!", place: "Bij de wasmachine", code: "TAART", hint: "Kijk waar de vuile was naartoe gaat.", evidence: "Op de wasmachine ligt een bril met chocola op het glas. Wie draagt er een bril én een stropdas?" }
+  ]
+};
+
+const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1";
+const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
+
+let cfg = load(KEY_CFG, null) || structuredClone(DEFAULT);
+let prog = load(KEY_PROG, null) || { team:"", index:0, phase:"start", wrongSuspects:[] };
+let ui = { hintShown:false, overlay:null, setupUnlocked:false, gateQ:null, msg:"" };
+
+const app = document.getElementById("app");
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const norm = s => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]/gi,"").toUpperCase();
+const saveProg = () => save(KEY_PROG, prog);
+
+/* ---------- sound ---------- */
+let actx;
+function beep(ok){
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const notes = ok ? [523,659,784,1047] : [220,180];
+    notes.forEach((f,i)=>{
+      const o=actx.createOscillator(), g=actx.createGain();
+      o.type = ok ? "triangle" : "sawtooth"; o.frequency.value=f;
+      g.gain.setValueAtTime(.0001, actx.currentTime+i*.11);
+      g.gain.exponentialRampToValueAtTime(.18, actx.currentTime+i*.11+.02);
+      g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime+i*.11+.25);
+      o.connect(g).connect(actx.destination); o.start(actx.currentTime+i*.11); o.stop(actx.currentTime+i*.11+.3);
+    });
+  }catch(e){}
+}
+
+/* ---------- confetti ---------- */
+function confetti(){
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const c=document.getElementById("confetti"); c.hidden=false;
+  const ctx=c.getContext("2d"); const W=c.width=innerWidth, H=c.height=innerHeight;
+  const cols=["#c42f28","#f4d43c","#2d8549","#e9d29c","#4aa3c7","#fdf8ea"];
+  const ps=Array.from({length:160},()=>({x:Math.random()*W,y:-20-Math.random()*H*.5,r:4+Math.random()*6,c:cols[Math.random()*cols.length|0],vy:2+Math.random()*3,vx:-1.5+Math.random()*3,a:Math.random()*6,va:-.2+Math.random()*.4}));
+  let t=0;(function f(){ctx.clearRect(0,0,W,H);ps.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.a+=p.va;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.a);ctx.fillStyle=p.c;ctx.fillRect(-p.r,-p.r/2,p.r*2,p.r);ctx.restore();});
+    if(++t<240) requestAnimationFrame(f); else {ctx.clearRect(0,0,W,H); c.hidden=true;}})();
+}
+
+/* ---------- wake lock ---------- */
+async function keepAwake(){ try{ if(navigator.wakeLock) await navigator.wakeLock.request("screen"); }catch(e){} }
+
+/* ---------- screens ---------- */
+function folder(tab, inner){ return `<div class="folder"><span class="tab-label">${esc(tab)}</span><div class="stack">${inner}</div></div>`; }
+
+function evidenceList(upto){
+  const items = cfg.steps.slice(0, upto).map((s,i)=>`<li><span class="nr">#${i+1}</span><span>${esc(s.evidence)}</span></li>`).join("");
+  return items ? `<div class="stack" style="gap:10px"><p class="type muted">BEWIJSSTUKKEN</p><ul class="evidence">${items}</ul></div>` : "";
+}
+
+function renderStart(){
+  const resume = prog.phase !== "start" && (prog.index>0 || prog.phase!=="clue");
+  return folder("DOSSIER #8 · STRENG GEHEIM", `
+    <span class="stamp">GEHEIM</span>
+    <h1>${esc(cfg.title)}</h1>
+    <div class="paper tilt"><span class="tape"></span><p>${esc(cfg.story)}</p></div>
+    <div>
+      <label class="lbl" for="team">Hoe heet jullie detectivebureau?</label>
+      <input type="text" id="team" maxlength="40" placeholder="Bijv. De Speurneuzen" value="${esc(prog.team)}">
+    </div>
+    ${resume ? `<button class="btn" data-act="resume">Verder met het onderzoek</button>
+      <button class="btn alt" data-act="restart">Opnieuw beginnen</button>`
+      : `<button class="btn" data-act="begin">Start het onderzoek</button>`}
+    <p class="muted" style="font-size:15px">${cfg.steps.length} aanwijzingen · bij elke plek ligt een briefje met een geheime code</p>
+  `);
+}
+
+function renderClue(){
+  const i = prog.index, s = cfg.steps[i], n = cfg.steps.length;
+  const dots = cfg.steps.map((_,k)=>`<span class="dot ${k<i?"done":k===i?"now":""}"></span>`).join("");
+  return folder(`${(prog.team||"DETECTIVES").toUpperCase()} · AANWIJZING ${i+1}/${n}`, `
+    <div class="progress" aria-label="Aanwijzing ${i+1} van ${n}">${dots}</div>
+    <div class="paper"><span class="tape"></span>
+      <p class="type muted" style="margin-bottom:8px">AANWIJZING ${i+1}</p>
+      <p class="riddle">${esc(s.clue)}</p>
+    </div>
+    ${ui.hintShown ? `<div class="hint-box"><b>Tip:</b> ${esc(s.hint)}</div>`
+      : (s.hint ? `<button class="btn ghost" data-act="hint">We komen er niet uit… geef een tip</button>` : "")}
+    <form id="codeForm" class="stack" style="gap:10px" autocomplete="off">
+      <label class="lbl" for="code">Gevonden? Typ de geheime code van het briefje:</label>
+      <input type="text" id="code" class="code-input" autocapitalize="characters" spellcheck="false" placeholder="CODE">
+      <button class="btn" type="submit">Controleer code</button>
+      <p class="msg bad" id="msg" aria-live="polite">${esc(ui.msg)}</p>
+    </form>
+    ${evidenceList(i)}
+  `);
+}
+
+function renderAccuse(){
+  return folder(`${(prog.team||"DETECTIVES").toUpperCase()} · ONTKNOPING`, `
+    <span class="stamp">ALLE BEWIJS VERZAMELD</span>
+    <h2>Wie heeft de taart gepikt?</h2>
+    <p>Lees alle bewijsstukken goed. Overleg samen en tik dan op de dader!</p>
+    ${evidenceList(cfg.steps.length)}
+    <div class="suspects">${cfg.suspects.map((n,k)=>`<button class="suspect ${prog.wrongSuspects.includes(k)?"wrong":""}" data-act="accuse" data-k="${k}" ${prog.wrongSuspects.includes(k)?"disabled":""}>${esc(n)}</button>`).join("")}</div>
+    <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>
+  `);
+}
+
+function renderSolved(){
+  return folder("ZAAK OPGELOST", `
+    <span class="stamp" style="color:var(--good);border-color:var(--good)">OPGELOST!</span>
+    <h1>Goed gedaan, ${esc(prog.team||"detectives")}!</h1>
+    <div class="paper tilt"><span class="tape"></span>
+      <p><b>${esc(cfg.suspects[cfg.culpritIndex])}</b> was de dader! En de taart is verstopt…</p>
+      <p class="riddle" style="margin-top:12px">${esc(cfg.finalHide)}</p>
+    </div>
+    <p>Ga snel kijken! 🎉</p>
+    <button class="btn alt" data-act="party">Nog meer confetti</button>
+    <button class="btn ghost" data-act="restart">Opnieuw spelen</button>
+  `);
+}
+
+/* ---------- parent setup ---------- */
+function renderGate(){
+  if(!ui.gateQ){ const a=6+(Math.random()*6|0), b=6+(Math.random()*4|0); ui.gateQ={a,b}; }
+  return folder("ALLEEN VOOR OUDERS", `
+    <h2>Instellingen</h2>
+    <p>Om de instellingen te openen: hoeveel is ${ui.gateQ.a} × ${ui.gateQ.b}?</p>
+    <form id="gateForm" class="stack" style="gap:10px">
+      <input type="text" id="gate" inputmode="numeric" class="code-input" placeholder="?">
+      <button class="btn" type="submit">Open</button>
+      <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>
+    </form>
+    <button class="btn ghost" data-act="back">Terug naar het spel</button>
+  `);
+}
+
+function renderSetup(){
+  const steps = cfg.steps.map((s,i)=>`
+    <div class="step-edit stack" style="gap:10px" data-i="${i}">
+      <div class="row" style="align-items:center"><b style="flex:0 0 auto">Plek ${i+1}</b>
+        <span style="display:flex;gap:6px;flex:0 0 auto;margin-left:auto">
+          <button class="btn alt small" data-act="up" data-i="${i}" ${i===0?"disabled":""} aria-label="Omhoog">↑</button>
+          <button class="btn alt small" data-act="down" data-i="${i}" ${i===cfg.steps.length-1?"disabled":""} aria-label="Omlaag">↓</button>
+          <button class="btn alt small" data-act="del" data-i="${i}" aria-label="Verwijder plek ${i+1}">✕</button>
+        </span></div>
+      <div><label class="lbl" for="place-${i}">Verstopplek (alleen voor jou)</label><input type="text" id="place-${i}" data-f="place" value="${esc(s.place)}"></div>
+      <div><label class="lbl" for="clue-${i}">Raadsel voor de kinderen</label><textarea id="clue-${i}" data-f="clue">${esc(s.clue)}</textarea></div>
+      <div class="row">
+        <div><label class="lbl" for="code-${i}">Geheime code op het briefje</label><input type="text" id="code-${i}" data-f="code" value="${esc(s.code)}" class="type" style="text-transform:uppercase"></div>
+        <div><label class="lbl" for="hint-${i}">Tip</label><input type="text" id="hint-${i}" data-f="hint" value="${esc(s.hint)}"></div>
+      </div>
+      <div><label class="lbl" for="ev-${i}">Bewijsstuk dat ze hier vinden</label><textarea id="ev-${i}" data-f="evidence" style="min-height:64px">${esc(s.evidence)}</textarea></div>
+    </div>`).join("");
+  const notes = cfg.steps.map((s,i)=>`<div><span>${i+1}. ${esc(s.place)}</span><b>${esc(norm(s.code))}</b></div>`).join("");
+  return folder("INSTELLINGEN · OUDERS", `
+    <h2>Speurtocht instellen</h2>
+    <p class="muted" style="font-size:16px">Alles wordt bewaard op dít apparaat. Stel het dus in op de telefoon of tablet waarmee de kinderen spelen.</p>
+    <div><label class="lbl" for="s-title">Titel</label><input type="text" id="s-title" value="${esc(cfg.title)}"></div>
+    <div><label class="lbl" for="s-story">Verhaal op het startscherm</label><textarea id="s-story">${esc(cfg.story)}</textarea></div>
+    <h2 style="font-size:20px;margin-top:8px">Plekken in huis</h2>
+    ${steps}
+    <button class="btn alt" data-act="add">+ Plek toevoegen</button>
+    <h2 style="font-size:20px;margin-top:8px">Verdachten</h2>
+    <div><label class="lbl" for="s-suspects">Namen, gescheiden door komma's</label><input type="text" id="s-suspects" value="${esc(cfg.suspects.join(", "))}"></div>
+    <div><label class="lbl" for="s-culprit">Wie is de dader?</label>
+      <select id="s-culprit">${cfg.suspects.map((n,k)=>`<option value="${k}" ${k===cfg.culpritIndex?"selected":""}>${esc(n)}</option>`).join("")}</select></div>
+    <div><label class="lbl" for="s-final">Waar ligt de taart / traktatie echt?</label><input type="text" id="s-final" value="${esc(cfg.finalHide)}"></div>
+    <button class="btn" data-act="saveSetup">Opslaan</button>
+    <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
+    <p class="muted" style="font-size:16px">Schrijf elke code op een briefje en leg het op de juiste plek. Hoofdletters of spaties maken niet uit.</p>
+    <div class="notes-list">${notes}</div>
+    <h2 style="font-size:20px;margin-top:8px">Overzetten naar ander apparaat</h2>
+    <p class="muted" style="font-size:16px">Kopieer deze tekst, open het spel op het andere apparaat, ga naar Instellingen en plak hem hieronder.</p>
+    <textarea id="s-json" class="type" style="font-size:13px;min-height:110px">${esc(JSON.stringify(cfg))}</textarea>
+    <div class="row">
+      <button class="btn alt small" data-act="copyJson">Kopieer</button>
+      <button class="btn alt small" data-act="importJson">Gebruik geplakte tekst</button>
+    </div>
+    <p class="msg" id="setupMsg" aria-live="polite">${esc(ui.msg)}</p>
+    <div class="row">
+      <button class="btn alt small" data-act="resetProg">Spel terug naar begin</button>
+      <button class="btn alt small" data-act="resetAll">Voorbeeld herstellen</button>
+    </div>
+    <button class="btn ghost" data-act="back">Terug naar het spel</button>
+  `);
+}
+
+function render(){
+  let html;
+  if (ui.view==="gate") html = renderGate();
+  else if (ui.view==="setup") html = renderSetup();
+  else if (prog.phase==="clue") html = renderClue();
+  else if (prog.phase==="accuse") html = renderAccuse();
+  else if (prog.phase==="solved") html = renderSolved();
+  else html = renderStart();
+  if (!ui.view) html += `<button class="parents" data-act="openSetup">Ouders</button>`;
+  if (ui.overlay) html += ui.overlay;
+  app.innerHTML = html;
+  const ci = document.getElementById("code"); if (ci && !ui.overlay) ci.focus({preventScroll:true});
+}
+
+function collectSetup(){
+  cfg.title = document.getElementById("s-title").value.trim() || DEFAULT.title;
+  cfg.story = document.getElementById("s-story").value.trim();
+  document.querySelectorAll(".step-edit").forEach(el=>{
+    const i=+el.dataset.i;
+    el.querySelectorAll("[data-f]").forEach(f=>{ cfg.steps[i][f.dataset.f] = f.value.trim(); });
+  });
+  const sus = document.getElementById("s-suspects").value.split(",").map(s=>s.trim()).filter(Boolean);
+  cfg.suspects = sus.length>=2 ? sus : cfg.suspects;
+  cfg.culpritIndex = Math.min(+document.getElementById("s-culprit").value||0, cfg.suspects.length-1);
+  cfg.finalHide = document.getElementById("s-final").value.trim();
+}
+
+function setupMsg(t){ ui.msg=t; const m=document.getElementById("setupMsg"); if(m) m.textContent=t; }
+
+/* ---------- events ---------- */
+app.addEventListener("click", e=>{
+  const b = e.target.closest("[data-act]"); if(!b) return;
+  const act=b.dataset.act, i=+b.dataset.i;
+  ui.msg="";
+  switch(act){
+    case "begin": case "restart":
+      if (act==="restart" && prog.phase!=="start" && !b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker weten? Tik nog een keer"; return; }
+      prog = { team:(document.getElementById("team")?.value||prog.team||"").trim(), index:0, phase: act==="begin"?"clue":"start", wrongSuspects:[] };
+      if(act==="begin"){ keepAwake(); beep(true); }
+      ui.hintShown=false; saveProg(); render(); scrollTo(0,0); break;
+    case "resume":
+      prog.team=(document.getElementById("team")?.value||prog.team).trim(); if(prog.phase==="start") prog.phase="clue";
+      keepAwake(); saveProg(); render(); break;
+    case "hint": ui.hintShown=true; render(); break;
+    case "next":
+      ui.overlay=null; ui.hintShown=false;
+      prog.index++; prog.phase = prog.index>=cfg.steps.length ? "accuse" : "clue";
+      saveProg(); render(); scrollTo(0,0); break;
+    case "accuse": {
+      const k=+b.dataset.k;
+      if(k===cfg.culpritIndex){ prog.phase="solved"; saveProg(); beep(true); render(); confetti(); scrollTo(0,0); }
+      else { prog.wrongSuspects.push(k); saveProg(); beep(false); ui.msg="Nee hoor! Kijk nog eens goed naar de bewijsstukken."; render(); }
+      break; }
+    case "party": beep(true); confetti(); break;
+    case "openSetup": ui.view = ui.setupUnlocked ? "setup" : "gate"; ui.gateQ=null; render(); scrollTo(0,0); break;
+    case "back": ui.view=null; render(); scrollTo(0,0); break;
+    case "add": collectSetup(); cfg.steps.push({clue:"",place:"",code:"",hint:"",evidence:""}); render(); break;
+    case "del": collectSetup(); if(cfg.steps.length>1){ cfg.steps.splice(i,1); } render(); break;
+    case "up": case "down": { collectSetup(); const j = act==="up"?i-1:i+1; [cfg.steps[i],cfg.steps[j]]=[cfg.steps[j],cfg.steps[i]]; render(); break; }
+    case "saveSetup": {
+      collectSetup();
+      const empty = cfg.steps.findIndex(s=>!norm(s.code) || !s.clue);
+      if(empty>=0){ setupMsg(`Plek ${empty+1} mist nog een raadsel of code.`); return; }
+      save(KEY_CFG,cfg); if(prog.index>=cfg.steps.length && prog.phase==="clue"){ prog.index=0; saveProg(); }
+      render(); setupMsg("Opgeslagen."); break; }
+    case "copyJson": {
+      const t=document.getElementById("s-json");
+      navigator.clipboard?.writeText(t.value).then(()=>setupMsg("Gekopieerd."), ()=>{ t.select(); setupMsg("Tekst is geselecteerd: kopieer hem zelf."); })
+        ?? (t.select(), setupMsg("Tekst is geselecteerd: kopieer hem zelf."));
+      break; }
+    case "importJson":
+      try{ const c=JSON.parse(document.getElementById("s-json").value);
+        if(!Array.isArray(c.steps)||!c.steps.length||!Array.isArray(c.suspects)) throw 0;
+        cfg=Object.assign(structuredClone(DEFAULT), c); save(KEY_CFG,cfg); render(); setupMsg("Instellingen overgenomen.");
+      }catch(err){ setupMsg("Die tekst klopt niet. Kopieer alles opnieuw vanaf het andere apparaat."); }
+      break;
+    case "resetProg": prog={team:"",index:0,phase:"start",wrongSuspects:[]}; saveProg(); render(); setupMsg("Spel staat weer aan het begin."); break;
+    case "resetAll":
+      if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker? Tik nog een keer"; return; }
+      cfg=structuredClone(DEFAULT); save(KEY_CFG,cfg); render(); setupMsg("Voorbeeldtocht hersteld."); break;
+  }
+});
+
+app.addEventListener("submit", e=>{
+  e.preventDefault();
+  if(e.target.id==="codeForm"){
+    const input=document.getElementById("code"), s=cfg.steps[prog.index];
+    if(!norm(input.value)) return;
+    if(norm(input.value)===norm(s.code)){
+      beep(true); confetti();
+      const last = prog.index===cfg.steps.length-1;
+      ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="Code goed"><div class="paper stack"><span class="tape"></span>
+        <span class="stamp" style="color:var(--good);border-color:var(--good)">CODE GOED!</span>
+        <p class="type muted">BEWIJSSTUK #${prog.index+1}</p>
+        <p class="riddle" style="font-size:20px">${esc(s.evidence)}</p>
+        <button class="btn" data-act="next">${last?"Naar de ontknoping":"Volgende aanwijzing"}</button></div></div>`;
+      render(); app.querySelector(".overlay .btn")?.focus();
+    } else {
+      beep(false); input.classList.remove("shake"); void input.offsetWidth; input.classList.add("shake");
+      document.getElementById("msg").textContent = "Die code klopt niet. Kijk nog eens goed op het briefje!";
+      input.select();
+    }
+  }
+  if(e.target.id==="gateForm"){
+    if(+document.getElementById("gate").value === ui.gateQ.a*ui.gateQ.b){ ui.setupUnlocked=true; ui.view="setup"; ui.msg=""; render(); scrollTo(0,0); }
+    else { ui.msg="Dat is niet goed."; ui.gateQ=null; render(); }
+  }
+});
+
+app.addEventListener("input", e=>{ if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); } });
+
+window.claude?.hot?.snapshot?.(()=>({ ui:{view:ui.view, setupUnlocked:ui.setupUnlocked} }));
+function start(data){ if(data && data.ui){ ui.view=data.ui.view||null; ui.setupUnlocked=!!data.ui.setupUnlocked; } render(); }
+window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+})();
+</script>
+
+<script>if("serviceWorker" in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));}</script>
+</body></html>

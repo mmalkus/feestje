@@ -1,0 +1,11 @@
+{
+  "name": "De Verdwenen Verjaardagstaart",
+  "short_name": "Speurtocht",
+  "lang": "nl",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1f4047",
+  "theme_color": "#1f4047",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+}
