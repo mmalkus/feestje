@@ -563,8 +563,7 @@ function renderStart(){
       <label class="lbl" for="team">Hoe heet jullie detectivebureau?</label>
       <input type="text" id="team" maxlength="40" placeholder="Bijv. De Speurneuzen" value="${esc(prog.team)}">
     </div>
-    ${resume ? `<button class="btn" data-act="resume">Verder met het onderzoek</button>
-      <button class="btn alt" data-act="restart">Opnieuw beginnen</button>`
+    ${resume ? `<button class="btn" data-act="resume">Verder met het onderzoek</button>`
       : `<button class="btn" data-act="begin">Start het onderzoek</button>`}
     <p class="muted" style="font-size:15px">${cfg.steps.length} opdrachten · raadsels, puzzels, foto's en geheime codes</p>
   `);
@@ -675,7 +674,6 @@ function renderSolved(){
     <p>Ga snel kijken! 🎉</p>
     ${album()}
     <button class="btn alt" data-act="party">Nog meer confetti</button>
-    <button class="btn ghost" data-act="restart">Opnieuw spelen</button>
   `);
 }
 
