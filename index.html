@@ -360,18 +360,40 @@ async function aiDraw(id){
       else if (e.status===400 || e.status===422) j = await ask(await agent(false), false); // model can't take the photo: draw from the prompt only
       else throw e;
     }
-    // The file chunk can sit anywhere in the outputs; look everywhere, and log what came back.
-    const findFile = o => { if (!o || typeof o!=="object") return null; if (typeof o.file_id==="string" && (!o.type || o.type==="tool_file")) return o;
-      for (const v of Object.values(o)){ const f = findFile(v); if (f) return f; } return null; };
+    // The picture can be referenced in several ways (tool_file chunk, file id under another key, a link,
+    // a data URL in the text); look everywhere, and log the raw reply so a failure can be traced.
+    const ID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+    const findFile = (o, key="") => {
+      if (typeof o === "string"){
+        const d = o.match(/data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+/); if (d) return { url:d[0] };
+        const m = o.match(/!\[[^\]]*\]\((https?:[^)\s]+)\)/); if (m) return { url:m[1] };
+        if (/file/i.test(key) && ID.test(o)) return { file_id:o };
+        if (/url/i.test(key) && /^https?:/.test(o)) return { url:o };
+        return null;
+      }
+      if (!o || typeof o!=="object") return null;
+      if (typeof o.file_id==="string" && o.file_id) return { file_id:o.file_id };
+      for (const [k,v] of Object.entries(o)){ const f = findFile(v, Array.isArray(o) ? key : k); if (f) return f; }
+      return null;
+    };
     const shape = r => (r.outputs||[]).map(o=>`${o.type||"?"}${o.name?`(${o.name})`:""}${Array.isArray(o.content)?`[${o.content.map(c=>c.type).join(",")}]`:""}`).join(" ") || "leeg";
-    aiLog.push(`antwoord: ${shape(j)}`);
-    let file = findFile(j.outputs);
-    if (!file && j.conversation_id){ // the model only talked about a picture: ask it to really draw it
-      const k = await api(`/conversations/${j.conversation_id}`, { json:{ stream:false,
-        inputs:"You did not call the image_generation tool. Call it now to actually create this picture." } });
-      aiLog.push(`antwoord: ${shape(k)}`); file = findFile(k.outputs); j = k;
+    const raw = o => JSON.stringify(o, (k,v)=> typeof v==="string" && v.length>120 ? v.slice(0,120)+"…" : v).slice(0,900);
+    const look = r => { aiLog.push(`antwoord: ${shape(r)}`); aiLog.push(`ruw: ${raw(r.outputs ?? r)}`); return findFile(r.outputs ?? r); };
+    let file = look(j);
+    const cid = j.conversation_id;
+    if (!file && cid){ // the full history sometimes holds the file chunk that the reply left out
+      try{ const h = await api(`/conversations/${cid}/history`);
+        const out = (h.entries||[]).filter(e=>e.type!=="message.input" && e.role!=="user"); // skip our own photo
+        file = findFile(out); if (!file) aiLog.push(`geschiedenis: ${raw(out)}`); }
+      catch(_){}
     }
-    if (file){
+    if (!file && cid){ // the model only talked about a picture: ask it to really draw it
+      const k = await api(`/conversations/${cid}`, { json:{ stream:false,
+        inputs:"You did not call the image_generation tool. Call it now to actually create this picture." } });
+      file = look(k); j = k;
+    }
+    if (file?.url){ out = await toImage(file.url); }
+    else if (file){
       try{ out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob(); }
       catch(e){ // fall back to a signed download link
         const { url } = await api(`/files/${file.file_id}/url?expiry=1`);
