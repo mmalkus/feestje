@@ -248,7 +248,7 @@ const toBlob = c => new Promise(r=>c.toBlob(r,"image/jpeg",.85));
 async function keepBlob(blob, prefix){
   const id = prefix + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
   try{ await DB.put(id, blob); }catch(e){} // private mode: keep it in memory only
-  imgs.set(id, URL.createObjectURL(blob)); return id;
+  imgs.set(id, typeof blob==="string" ? blob : URL.createObjectURL(blob)); return id;
 }
 async function storeImage(file, prefix, square){
   const url = URL.createObjectURL(file);
@@ -328,7 +328,7 @@ async function aiDetective(id){
 async function aiDraw(id){
   const blob = await (await fetch(imgs.get(id))).blob(), prompt = ai.prompt || AI_DEFAULT.prompt;
   const toImage = async url => (await fetch(url)).blob();
-  let out;
+  let out, outUrl;
   if (ai.style === "chat"){
     const j = await api("/chat/completions", { json:{ model:ai.model, modalities:["image","text"], messages:[{ role:"user", content:[
       { type:"text", text:prompt }, { type:"image_url", image_url:{ url: await blobToDataUrl(blob) } } ] }] } });
@@ -369,6 +369,7 @@ async function aiDraw(id){
         const m = o.match(/!\[[^\]]*\]\((https?:[^)\s]+)\)/); if (m) return { url:m[1] };
         if (/file/i.test(key) && ID.test(o)) return { file_id:o };
         if (/url/i.test(key) && /^https?:/.test(o)) return { url:o };
+        if (/^\s*[{[]/.test(o)){ try{ return findFile(JSON.parse(o), key); }catch(_){} } // e.g. info.result = '{"url": "…"}'
         return null;
       }
       if (!o || typeof o!=="object") return null;
@@ -392,7 +393,10 @@ async function aiDraw(id){
         inputs:"You did not call the image_generation tool. Call it now to actually create this picture." } });
       file = look(k); j = k;
     }
-    if (file?.url){ out = await toImage(file.url); }
+    if (file?.url){
+      try{ out = await toImage(file.url); aiLog.push("GET (plaatje) → ok"); }
+      catch(_){ aiLog.push("GET (plaatje) → geblokkeerd, plaatje wordt als link bewaard"); await loadImg(file.url); outUrl = file.url; }
+    }
     else if (file){
       try{ out = await (await api(`/files/${file.file_id}/content`, { raw:true })).blob(); }
       catch(e){ // fall back to a signed download link
@@ -417,6 +421,7 @@ async function aiDraw(id){
     const d = j.data?.[0] || {};
     if (d.b64_json) out = b64ToBlob(d.b64_json); else if (d.url) out = await toImage(d.url);
   }
+  if (!out && outUrl) return keepBlob(outUrl, "k-"); // the host blocks downloads: show the link instead
   if (!out) throw new Error("Geen plaatje ontvangen");
   return keepBlob(out, "k-");
 }
@@ -1058,7 +1063,7 @@ app.addEventListener("input", e=>{
 
 window.claude?.hot?.snapshot?.(()=>({ ui:{} })); // never restore an unlocked menu
 function start(data){
-  DB.all().then(m=>m.forEach((blob,k)=>imgs.set(k, URL.createObjectURL(blob)))).catch(()=>{}).finally(render);
+  DB.all().then(m=>m.forEach((blob,k)=>imgs.set(k, typeof blob==="string" ? blob : URL.createObjectURL(blob)))).catch(()=>{}).finally(render);
 }
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
 })();
