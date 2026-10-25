@@ -149,6 +149,14 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .viewfinder .flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none}
 .viewfinder .flash.go{animation:flash .5s ease-out}
 @keyframes flash{from{opacity:1} to{opacity:0}}
+.full.sketch{max-height:42vh; background:#fff}
+.viewfinder .ghost{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.55; mix-blend-mode:multiply; pointer-events:none}
+.meter-track{position:relative; height:24px; border-radius:12px; overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.35);
+  background:linear-gradient(90deg, #4aa3c7, #9fd3ee 30%, #f4d43c 60%, #e8843a 80%, #c42f28)}
+.meter-track span{position:absolute; top:0; right:0; bottom:0; background:#5b524a; transition:width .3s}
+.meter-txt{text-align:center; font:400 clamp(17px, 5vw, 22px)/1.2 var(--f-display); margin-top:8px}
+.btn.pulse{animation:pulse .8s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.05)}}
 .ailog{white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.4 ui-monospace, Menlo, monospace; margin:6px 0 0; color:var(--ink)}
 .check{display:flex; gap:10px; align-items:center; font-size:16px}
 .check input{width:24px; height:24px}
@@ -162,8 +170,12 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 <script>
 (function(){
 /* Step types: code = riddle + note with code; photo = "waar is dit?" zoomed photo + note; jigsaw = swap-tile photo puzzle + note;
-   scramble = letter puzzle on the tablet; camera = photo assignment, optionally turned into a detective picture. */
-const TYPES = { code:"Raadsel + briefje", photo:"Waar is dit? (foto)", jigsaw:"Fotopuzzel", scramble:"Letterpuzzel", camera:"Foto-opdracht" };
+   scramble = letter puzzle on the tablet; camera = photo assignment, optionally turned into a detective picture;
+   match = see a drawing of a spot, find it and photograph it (checked on the device, with an optional AI second opinion). */
+const TYPES = { code:"Raadsel + briefje", photo:"Waar is dit? (foto)", jigsaw:"Fotopuzzel", scramble:"Letterpuzzel", camera:"Foto-opdracht", match:"Zoek deze plek (foto-match)" };
+// pass = corners that must agree between the parent's photo and the kids' photo (unrelated photos reach about 5–11)
+const MATCH_LEVELS = { easy:{ name:"Makkelijk (kleine kinderen)", pass:12 }, normal:{ name:"Normaal", pass:18 }, strict:{ name:"Streng (precies dezelfde foto)", pass:30 } };
+const passFor = s => (MATCH_LEVELS[s.level] || MATCH_LEVELS.normal).pass;
 const NOTE_TYPES = ["code","photo","jigsaw"];
 
 const DEFAULT = {
@@ -187,14 +199,14 @@ const DEFAULT = {
    "chat" = /chat/completions with image output (OpenRouter, Gemini image models);
    "mistral" = Mistral agent with the image_generation tool (draws a new picture from a description of the photo). */
 const PROVIDERS = {
-  openai:     { name:"OpenAI",     base:"https://api.openai.com/v1",    style:"edits",   model:"gpt-image-1" },
-  openrouter: { name:"OpenRouter", base:"https://openrouter.ai/api/v1", style:"chat",    model:"google/gemini-2.5-flash-image" },
-  mistral:    { name:"Mistral",    base:"https://api.mistral.ai/v1",    style:"mistral", model:"mistral-medium-latest" },
-  custom:     { name:"Anders (zelf invullen)", base:"", style:"edits", model:"" }
+  openai:     { name:"OpenAI",     base:"https://api.openai.com/v1",    style:"edits",   model:"gpt-image-1", vision:"gpt-4.1-mini" },
+  openrouter: { name:"OpenRouter", base:"https://openrouter.ai/api/v1", style:"chat",    model:"google/gemini-2.5-flash-image", vision:"google/gemini-2.5-flash" },
+  mistral:    { name:"Mistral",    base:"https://api.mistral.ai/v1",    style:"mistral", model:"mistral-medium-latest", vision:"mistral-medium-latest" },
+  custom:     { name:"Anders (zelf invullen)", base:"", style:"edits", model:"", vision:"" }
 };
 const STYLES = { edits:"Foto bewerken (/images/edits)", chat:"Chat met plaatje terug (/chat/completions)", mistral:"Mistral agent (image_generation)" };
 const AI_DEFAULT = {
-  provider: "openai", keys: {}, base: PROVIDERS.openai.base, style: "edits", model: "gpt-image-1", models: [],
+  provider: "openai", keys: {}, base: PROVIDERS.openai.base, style: "edits", model: "gpt-image-1", models: [], verify: true, // verify: AI second opinion on "Zoek deze plek"
   prompt: "Turn this photo into a bright, friendly children's picture-book illustration in which everyone is a detective: deerstalker hats, magnifying glasses, little trench coats, a playful mystery atmosphere with a birthday cake hidden somewhere. Keep exactly the same people, their faces, hair, poses and the number of people. Cheerful, warm, kid-friendly, no text."
 };
 
@@ -204,7 +216,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 14;
+const VERSION = 15;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -214,8 +226,9 @@ let prog = load(KEY_PROG, null) || { team:"", index:0, phase:"start", wrongSuspe
 prog.sub = prog.sub || {}; prog.photos = prog.photos || [];
 let ai = Object.assign({}, AI_DEFAULT, load(KEY_AI, {}));
 if (ai.key){ ai.keys = { ...ai.keys, openai: ai.keys.openai || ai.key }; delete ai.key; } // settings from the first version
+if (ai.visionModel == null) ai.visionModel = PROVIDERS[ai.provider]?.vision || "";
 const aiKey = () => (ai.keys[ai.provider] || "").trim();
-let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0 };
+let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0, matchInfo:{} };
 
 /* ---------- parents' lock: a sum or a PIN; asked every time the menu opens ---------- */
 const KEY_LOCK = "speurtocht.lock.v1";
@@ -271,7 +284,7 @@ async function storeImage(file, prefix, square){
 }
 function dropImage(id){ if(!id) return; DB.del(id).catch(()=>{}); const u=imgs.get(id); if(u) URL.revokeObjectURL(u); imgs.delete(id); }
 function gcImages(){
-  const keep = new Set([...cfg.steps.map(s=>s.photo), ...prog.photos.flatMap(p=>[p.id,p.orig]), prog.sub.photo, prog.sub.styled]);
+  const keep = new Set([...cfg.steps.flatMap(s=>[s.photo, s.sketch]), ...prog.photos.flatMap(p=>[p.id,p.orig]), prog.sub.photo, prog.sub.styled]);
   [...imgs.keys()].forEach(k=>{ if(!keep.has(k)) dropImage(k); });
 }
 
@@ -504,6 +517,275 @@ async function camSnap(countdown){
   cam.busy = false; render();
 }
 
+/* ---------- spot matcher: ORB-style corners + binary descriptors, checked with RANSAC (no library, works offline) ---------- */
+// features(source) finds corners at a few scales; match(ref, query) counts the corners that agree on one camera move.
+const Match = (()=>{
+  const LEVELS = [1, .75, .56, .42], PER_LEVEL = 260, R = 15; // R: patch radius around a corner
+  // a fixed pseudo-random sampling pattern, so the reference and the hunt photo are described the same way
+  const PAIRS = (()=>{ let s = 7; const rnd = () => (s = (s*16807) % 2147483647) / 2147483647;
+    const g = () => { let v; do { v = Math.round((rnd()+rnd()+rnd()-1.5)*9); } while (Math.abs(v)>10); return v; };
+    return Int8Array.from({ length:256*4 }, g); })();
+  const CIRCLE = [[0,-3],[1,-3],[2,-2],[3,-1],[3,0],[3,1],[2,2],[1,3],[0,3],[-1,3],[-2,2],[-3,1],[-3,0],[-3,-1],[-2,-2],[-1,-3]];
+
+  function gray(src, maxSide){
+    const w0 = src.videoWidth || src.naturalWidth || src.width, h0 = src.videoHeight || src.naturalHeight || src.height;
+    const sc = Math.min(1, maxSide/Math.max(w0,h0)), w = Math.max(1, Math.round(w0*sc)), h = Math.max(1, Math.round(h0*sc));
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d", { willReadFrequently:true }); x.drawImage(src, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data, g = new Uint8ClampedArray(w*h), hist = new Float32Array(64);
+    for (let i=0, j=0; i<g.length; i++, j+=4){ g[i] = (d[j]*77 + d[j+1]*150 + d[j+2]*29) >> 8;
+      hist[(d[j]>>6)*16 + (d[j+1]>>6)*4 + (d[j+2]>>6)]++; }
+    for (let k=0; k<64; k++) hist[k] /= g.length;
+    // stretch the contrast, so a dim evening room looks like the daytime photo
+    const sorted = Float32Array.from(g).sort(), lo = sorted[g.length*.02|0], hi = Math.max(lo+1, sorted[g.length*.98|0]);
+    for (let i=0; i<g.length; i++) g[i] = (g[i]-lo) * 255 / (hi-lo);
+    return { g, w, h, hist };
+  }
+  function resize(im, f){
+    const w = Math.round(im.w*f), h = Math.round(im.h*f), g = new Uint8ClampedArray(w*h);
+    for (let y=0; y<h; y++) for (let x=0; x<w; x++){ // box average over the source pixels
+      const x0 = x/f|0, x1 = Math.max(x0+1, (x+1)/f|0), y0 = y/f|0, y1 = Math.max(y0+1, (y+1)/f|0); let s = 0, n = 0;
+      for (let yy=y0; yy<y1 && yy<im.h; yy++) for (let xx=x0; xx<x1 && xx<im.w; xx++){ s += im.g[yy*im.w+xx]; n++; }
+      g[y*w+x] = n ? s/n : 0; }
+    return { g, w, h };
+  }
+  function blur(im){ // two box passes ≈ gaussian, to make the descriptor tests less noisy
+    const { w, h } = im; let a = im.g, b = new Uint8ClampedArray(w*h);
+    for (let p=0; p<2; p++){
+      for (let y=0; y<h; y++) for (let x=0; x<w; x++){ const i=y*w+x; b[i] = (a[i-(x>0)] + 2*a[i] + a[i+(x<w-1)]) >> 2; }
+      [a, b] = [b, a.slice()];
+      for (let y=0; y<h; y++) for (let x=0; x<w; x++){ const i=y*w+x; b[i] = (a[i-(y>0)*w] + 2*a[i] + a[i+(y<h-1)*w]) >> 2; }
+      [a, b] = [b, new Uint8ClampedArray(w*h)];
+    }
+    return a;
+  }
+  function corners(im, t){ // FAST-9 with a score, 3×3 non-maximum suppression, spread out over a grid
+    const { g, w, h } = im, off = CIRCLE.map(([dx,dy])=>dy*w+dx), score = new Float32Array(w*h), B = R+2;
+    for (let y=B; y<h-B; y++) for (let x=B; x<w-B; x++){
+      const i = y*w+x, c = g[i], hi = c+t, lo = c-t;
+      const p0 = g[i+off[0]], p8 = g[i+off[8]], p4 = g[i+off[4]], p12 = g[i+off[12]];
+      if ((p0>hi)+(p4>hi)+(p8>hi)+(p12>hi) < 2 && (p0<lo)+(p4<lo)+(p8<lo)+(p12<lo) < 2) continue;
+      let best = 0;
+      for (const sign of [1,-1]){
+        let run = 0, sum = 0, bestSum = 0;
+        for (let k=0; k<25; k++){ const d = (g[i+off[k%16]] - c)*sign - t;
+          if (d > 0){ run++; sum += d; if (run>=9) bestSum = Math.max(bestSum, sum); } else { run = 0; sum = 0; } }
+        best = Math.max(best, bestSum);
+      }
+      score[i] = best;
+    }
+    const cell = Math.max(16, Math.round(Math.sqrt(w*h/48))), cells = new Map();
+    for (let y=B; y<h-B; y++) for (let x=B; x<w-B; x++){
+      const i = y*w+x, s = score[i]; if (!s) continue;
+      if (s < score[i-1] || s < score[i+1] || s < score[i-w] || s < score[i+w] || s < score[i-w-1] || s < score[i-w+1] || s < score[i+w-1] || s < score[i+w+1]) continue;
+      const k = (y/cell|0)*1000 + (x/cell|0); (cells.get(k) || cells.set(k, []).get(k)).push({ x, y, s });
+    }
+    const per = Math.ceil(PER_LEVEL/Math.max(1, cells.size)*1.5), out = [];
+    cells.forEach(list => out.push(...list.sort((a,b)=>b.s-a.s).slice(0, per)));
+    return out.sort((a,b)=>b.s-a.s).slice(0, PER_LEVEL);
+  }
+  function describe(sm, w, kps, scale, into){
+    for (const k of kps){
+      let m01 = 0, m10 = 0; // orientation from the intensity centroid, so a tilted phone still matches
+      for (let dy=-7; dy<=7; dy++) for (let dx=-7; dx<=7; dx++) if (dx*dx+dy*dy<=49){ const v = sm[(k.y+dy)*w + k.x+dx]; m10 += dx*v; m01 += dy*v; }
+      const a = Math.atan2(m01, m10), ca = Math.cos(a), sa = Math.sin(a), d = new Uint32Array(8), base = k.y*w + k.x;
+      for (let b=0; b<256; b++){
+        const x1 = PAIRS[b*4], y1 = PAIRS[b*4+1], x2 = PAIRS[b*4+2], y2 = PAIRS[b*4+3];
+        const p = sm[base + Math.round(x1*sa + y1*ca)*w + Math.round(x1*ca - y1*sa)];
+        const q = sm[base + Math.round(x2*sa + y2*ca)*w + Math.round(x2*ca - y2*sa)];
+        if (p < q) d[b>>5] |= 1 << (b&31);
+      }
+      into.push({ x:k.x/scale, y:k.y/scale, d });
+    }
+  }
+  function features(src, maxSide=400){
+    const base = gray(src, maxSide), kps = [];
+    for (const f of LEVELS){
+      const im = f===1 ? base : resize(base, f), sm = blur(im);
+      let t = 22, cs = corners(im, t);
+      if (cs.length < 80){ t = 12; cs = corners(im, t); } // dull photo: be less picky
+      describe(sm, im.w, cs, f, kps);
+    }
+    return { kps, w:base.w, h:base.h, hist:base.hist };
+  }
+  const pop = v => { v -= (v>>>1) & 0x55555555; v = (v & 0x33333333) + ((v>>>2) & 0x33333333); return (((v + (v>>>4)) & 0x0f0f0f0f) * 0x01010101) >>> 24; };
+  const ham = (a, b) => pop(a[0]^b[0])+pop(a[1]^b[1])+pop(a[2]^b[2])+pop(a[3]^b[3])+pop(a[4]^b[4])+pop(a[5]^b[5])+pop(a[6]^b[6])+pop(a[7]^b[7]);
+
+  // affine map from 3 point pairs (p → q); null when the points are (nearly) on one line
+  function affine(p, q){
+    const [a,b,c] = p, det = (b.x-a.x)*(c.y-a.y) - (c.x-a.x)*(b.y-a.y);
+    if (Math.abs(det) < 1e-3) return null;
+    const solve = (u0,u1,u2) => { const A = ((u1-u0)*(c.y-a.y) - (u2-u0)*(b.y-a.y))/det, B = ((u2-u0)*(b.x-a.x) - (u1-u0)*(c.x-a.x))/det;
+      return [A, B, u0 - A*a.x - B*a.y]; };
+    return [...solve(q[0].x,q[1].x,q[2].x), ...solve(q[0].y,q[1].y,q[2].y)];
+  }
+  function match(ref, qry){
+    // 1. for each corner in the hunt photo, the most similar corner in the reference (and clearly better than any other spot)
+    const pairs = [];
+    for (const q of qry.kps){
+      let b1 = 999, b2 = 999, bi = -1;
+      for (let j=0; j<ref.kps.length; j++){ const r = ref.kps[j], d = ham(q.d, r.d);
+        if (d < b1){ if (bi<0 || Math.abs(ref.kps[bi].x-r.x)+Math.abs(ref.kps[bi].y-r.y) > 8) b2 = b1; b1 = d; bi = j; }
+        else if (d < b2 && Math.abs(ref.kps[bi].x-r.x)+Math.abs(ref.kps[bi].y-r.y) > 8) b2 = d; }
+      if (bi >= 0 && b1 < 70 && b1 < b2*.8) pairs.push({ r:ref.kps[bi], q, d:b1 });
+    }
+    // 2. RANSAC: the largest group of pairs that one camera move (affine) explains
+    const tol = Math.max(qry.w, qry.h) * .03, tol2 = tol*tol;
+    let best = 0, bestM = null, seed = 1;
+    const rnd = n => (seed = (seed*16807) % 2147483647) % n;
+    if (pairs.length >= 3) for (let it=0; it<400; it++){
+      const s = [pairs[rnd(pairs.length)], pairs[rnd(pairs.length)], pairs[rnd(pairs.length)]];
+      const M = affine(s.map(p=>p.r), s.map(p=>p.q)); if (!M) continue;
+      const det = M[0]*M[4] - M[1]*M[3], sx = Math.hypot(M[0], M[3]), sy = Math.hypot(M[1], M[4]);
+      if (det <= 0 || det < .08 || det > 12 || sx/sy > 2 || sy/sx > 2) continue; // mirrored or wildly stretched: not a camera move
+      let n = 0;
+      for (const p of pairs){ const ex = M[0]*p.r.x + M[1]*p.r.y + M[2] - p.q.x, ey = M[3]*p.r.x + M[4]*p.r.y + M[5] - p.q.y; if (ex*ex+ey*ey < tol2) n++; }
+      if (n > best){ best = n; bestM = M; }
+    }
+    // count each reference spot once (the same corner can be found at several scales)
+    const seen = new Set(); let inliers = 0;
+    if (bestM) for (const p of pairs){ const M = bestM, ex = M[0]*p.r.x + M[1]*p.r.y + M[2] - p.q.x, ey = M[3]*p.r.x + M[4]*p.r.y + M[5] - p.q.y;
+      if (ex*ex+ey*ey < tol2){ const k = `${Math.round(p.r.x/6)},${Math.round(p.r.y/6)}`; if (!seen.has(k)){ seen.add(k); inliers++; } } }
+    let colour = 0; for (let k=0; k<64; k++) colour += Math.min(ref.hist[k], qry.hist[k]); // 1 = same colours
+    return { inliers, pairs:pairs.length, colour };
+  }
+  return { features, match };
+})();
+
+/* ---------- "Zoek deze plek": drawing, live warmer/colder meter, checking the photo ---------- */
+function boxBlur(a, w, h, r){
+  const t = new Float32Array(w*h), o = new Float32Array(w*h), n = 2*r+1, cx = v => v<0 ? 0 : v>=w ? w-1 : v, cy = v => v<0 ? 0 : v>=h ? h-1 : v;
+  for (let y=0; y<h; y++){ const row = y*w; let s = 0;
+    for (let k=-r-1; k<r; k++) s += a[row+cx(k)];
+    for (let x=0; x<w; x++){ s += a[row+cx(x+r)] - a[row+cx(x-r-1)]; t[row+x] = s/n; } }
+  for (let x=0; x<w; x++){ let s = 0;
+    for (let k=-r-1; k<r; k++) s += t[cy(k)*w+x];
+    for (let y=0; y<h; y++){ s += t[cy(y+r)*w+x] - t[cy(y-r-1)*w+x]; o[y*w+x] = s/n; } }
+  return o;
+}
+// Pencil drawing of the parent's photo (colour dodge of the grey photo with its blurred negative), so the kids get a drawing, not the answer.
+async function sketchOf(id){
+  const im = await loadImg(imgs.get(id)), w = im.naturalWidth, h = im.naturalHeight, c = document.createElement("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d"); x.drawImage(im, 0, 0);
+  const d = x.getImageData(0, 0, w, h), p = d.data, g = new Float32Array(w*h);
+  for (let i=0; i<g.length; i++) g[i] = p[i*4]*.3 + p[i*4+1]*.59 + p[i*4+2]*.11;
+  let b = Float32Array.from(g, v=>255-v); const r = Math.max(2, Math.round(Math.max(w,h)/110));
+  for (let k=0; k<3; k++) b = boxBlur(b, w, h, r);
+  const ink = [43,36,32], paper = [253,248,234];
+  for (let i=0; i<g.length; i++){
+    const v = Math.pow(Math.min(1, g[i]/Math.max(1, 255-b[i])), 3); // 1 = paper, 0 = pencil line
+    for (let k=0; k<3; k++) p[i*4+k] = ink[k] + (paper[k]-ink[k])*v;
+  }
+  x.putImageData(d, 0, 0);
+  return keepBlob(await toBlob(c), "p-");
+}
+const refCache = new Map(); // photo id -> promise of its features
+const refFeat = id => refCache.get(id) || refCache.set(id, loadImg(imgs.get(id)).then(im=>Match.features(im, 400))).get(id);
+const photoMatch = async (refId, id) => Match.match(await refFeat(refId), Match.features(await loadImg(imgs.get(id)), 320));
+// How recognisable a spot is: match the photo against a turned, smaller, darker copy of itself.
+async function spotQuality(id){
+  const im = await loadImg(imgs.get(id)), c = document.createElement("canvas"), x = c.getContext("2d");
+  c.width = 480; c.height = Math.round(480*im.naturalHeight/im.naturalWidth);
+  x.fillStyle = "#777"; x.fillRect(0, 0, c.width, c.height);
+  x.translate(c.width/2, c.height/2); x.rotate(.1); x.scale(.85, .85); x.drawImage(im, -c.width/2, -c.height/2, c.width, c.height);
+  x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = "rgba(0,0,0,.45)"; x.fillRect(0, 0, c.width, c.height);
+  return Match.match(await refFeat(id), Match.features(c, 320)).inliers;
+}
+const qualityText = q => q >= 70 ? `✓ Goed herkenbaar (${q} punten).`
+  : q >= 35 ? `Redelijk herkenbaar (${q} punten). Lukt het niet, kies dan ‘Makkelijk’ of zet de AI aan.`
+  : `⚠ Weinig details (${q} punten): de tablet herkent deze plek slecht. Kies een plek met meer spullen of patronen, of fotografeer van iets dichterbij.`;
+
+// AI second opinion: a model that can look at photos compares the two (same service and key as the detective drawings).
+const aiVerifyReady = () => !!(ai.verify && aiKey() && ai.base && ai.visionModel);
+async function aiSameSpot(refId, id){
+  aiLog = [];
+  const small = async src => { const im = await loadImg(imgs.get(src)), sc = Math.min(1, 768/Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement("canvas");
+    c.width = Math.round(im.naturalWidth*sc); c.height = Math.round(im.naturalHeight*sc); c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+    return blobToDataUrl(await toBlob(c)); };
+  const mistral = ai.provider==="mistral" || /mistral\.ai/.test(ai.base); // Mistral wants the data URL as a plain string
+  const pic = url => ({ type:"image_url", image_url: mistral ? url : { url } });
+  const j = await api("/chat/completions", { json:{ model:ai.visionModel, messages:[{ role:"user", content:[
+    { type:"text", text:"You are the referee of a children's photo scavenger hunt in a house. Image 1 is the reference photo of a hiding spot. Image 2 was just taken by the children. Does image 2 show the same spot (the same object or place), allowing for a different angle, distance, zoom, lighting and small things that moved? Another object of the same kind (another chair, another door, another plant) is NOT the same spot. Answer only with JSON: {\"same\": true or false, \"tip\": \"one short friendly hint in Dutch for the children, at most 15 words, that does not give away the spot\"}" },
+    pic(await small(refId)), pic(await small(id)) ] }] } });
+  const c = j.choices?.[0]?.message?.content, txt = typeof c==="string" ? c : (c||[]).map(p=>p.text||"").join("");
+  aiLog.push(`antwoord: ${txt.slice(0,300)}`);
+  try{ const r = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]); return { same: r.same===true || r.same==="true", tip: String(r.tip||"") }; }
+  catch(_){ return { same: /^\W*(yes|ja|true)\b/i.test(txt), tip:"" }; }
+}
+
+const BANDS = [{ upto:.12, t:"❄️ IJskoud" }, { upto:.35, t:"🥶 Koud" }, { upto:.6, t:"🙂 Lauw" }, { upto:.88, t:"♨️ Warm!" }, { upto:Infinity, t:"🔥 HEET! Maak nu de foto!" }];
+const hunt = { running:false, warm:0, band:0 };
+const clamp01 = v => Math.max(0, Math.min(1, v));
+// 0 = nothing alike, 1 = enough to pass. Similar colours (the right room) only count for a little.
+const warmth = (m, s) => Math.max(clamp01((m.inliers-4)/(passFor(s)-4)), clamp01((m.colour-.5)/.35)*.3);
+function showWarmth(w){
+  hunt.warm = hunt.warm*.55 + w*.45;
+  const band = BANDS.findIndex(b=>hunt.warm < b.upto);
+  if (band > hunt.band) tick(band>=3);
+  hunt.band = band;
+  const cover = document.getElementById("meterCover"), txt = document.getElementById("meterTxt");
+  if (cover) cover.style.width = `${100 - hunt.warm*100}%`;
+  if (txt) txt.textContent = BANDS[band].t;
+  app.querySelector("[data-act=huntSnap]")?.classList.toggle("pulse", band===BANDS.length-1);
+}
+// Runs while a viewfinder of a "Zoek deze plek" step is on screen: compares a small camera frame with the photo a few times a second.
+function huntLoop(){
+  if (hunt.running) return; hunt.running = true;
+  (async function go(){
+    const v = document.getElementById("vf"), s = cfg.steps[prog.index];
+    if (!v || prog.phase!=="clue" || !s || kind(s)!=="match"){ hunt.running = false; return; }
+    if (v.videoWidth && !ui.overlay && !ui.busy && !cam.busy && document.visibilityState==="visible"){
+      try{ showWarmth(warmth(Match.match(await refFeat(s.photo), Match.features(v, 320)), s)); }catch(e){ console.warn(e); }
+    }
+    setTimeout(go, 150);
+  })();
+}
+async function huntSnap(){
+  const v = document.getElementById("vf");
+  if (!v || !v.videoWidth || cam.busy) return;
+  cam.busy = true; tick(true); document.getElementById("flash")?.classList.add("go");
+  const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext("2d").drawImage(v, 0, 0); // not mirrored: compare the room as it really is
+  await sleep(250);
+  let id;
+  try{ id = await storeImage(await toBlob(c), "k-", false); }
+  catch(err){ cam.busy = false; ui.msg = "Dat lukte niet. Probeer het nog een keer."; return render(); }
+  cam.busy = false; checkSpot(id);
+}
+async function checkSpot(id){
+  const s = cfg.steps[prog.index], sub = prog.sub;
+  ui.busy = "Even kijken of dit de goede plek is…"; render();
+  let m = { inliers:0, colour:0 }, tip = "", note = "";
+  try{ m = await photoMatch(s.photo, id); }catch(e){ console.warn(e); }
+  let ok = m.inliers >= passFor(s);
+  if (!ok && aiVerifyReady()){
+    ui.busy = "Twijfel… de detective-computer kijkt mee 🔎"; render();
+    try{ const r = await aiSameSpot(s.photo, id); ok = r.same; tip = r.tip; }
+    catch(e){ console.warn(e); note = " (De AI kon niet meekijken.)"; }
+  }
+  ui.busy = "";
+  if (ok){ prog.photos.push({ id, orig:id }); hunt.warm = 0; hunt.band = 0; ui.ghost = false; saveProg(); return solveStep(); }
+  dropImage(id); sub.tries = (sub.tries||0) + 1; saveProg(); beep(false);
+  ui.msg = (tip || (warmth(m, s) > .5 ? "Bijna! Jullie zijn dichtbij. Fotografeer precies hetzelfde stukje als op de tekening."
+    : "Dit is niet de goede plek. Kijk nog eens goed naar de tekening!")) + note;
+  render();
+}
+// Parents can always approve a spot (sum or PIN, like the settings menu), so a picky check never blocks the party.
+function approveOverlay(msg=""){
+  const pin = lock.mode==="pin" && lock.hash;
+  if (!pin) ui.approveQ = hardSum();
+  ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="Ouders keuren goed"><div class="paper stack"><span class="tape"></span>
+    <h2>Alleen voor ouders</h2>
+    <p>${pin ? "Typ de pincode om deze plek goed te keuren." : `Om deze plek goed te keuren: hoeveel is ${ui.approveQ.a} × ${ui.approveQ.b}?`}</p>
+    <form id="approveForm" class="stack" style="gap:10px" autocomplete="off">
+      <input type="${pin?"password":"text"}" id="approve" inputmode="numeric" class="code-input" placeholder="${pin?"PINCODE":"?"}" autocomplete="off">
+      <button class="btn" type="submit">Goedkeuren</button>
+      <p class="msg bad" id="approveMsg" aria-live="polite">${esc(msg)}</p>
+    </form>
+    <button class="btn ghost" data-act="closeOverlay">Annuleer</button></div></div>`;
+  render(); document.getElementById("approve")?.focus();
+}
+
 /* ---------- confetti ---------- */
 function confetti(){
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -588,9 +870,13 @@ const codeForm = () => `
 function renderClue(){
   const i = prog.index, s = cfg.steps[i], n = cfg.steps.length, k = kind(s), sub = prog.sub;
   const dots = cfg.steps.map((_,j)=>`<span class="dot ${j<i?"done":j===i?"now":""}"></span>`).join("");
-  const label = { code:"AANWIJZING", photo:"WAAR IS DIT?", jigsaw:"FOTOPUZZEL", scramble:"LETTERPUZZEL", camera:"FOTO-OPDRACHT" }[k];
+  const label = { code:"AANWIJZING", photo:"WAAR IS DIT?", jigsaw:"FOTOPUZZEL", scramble:"LETTERPUZZEL", camera:"FOTO-OPDRACHT", match:"FOTOJACHT" }[k];
   let text = s.clue || { photo:"Waar is dit? Zoek de plek van de foto. Daar ligt een briefje met een geheime code!",
-    jigsaw:"De foto is in stukjes gevallen! Tik op twee stukjes om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt." }[k] || "";
+    jigsaw:"De foto is in stukjes gevallen! Tik op twee stukjes om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
+    match:"Waar is deze plek? Zoek hem en maak er een foto van, vanaf dezelfde kant als de tekening. De meter zegt of jullie warm of koud zijn!" }[k] || "";
+  // selfies for photo assignments, the back camera for finding a spot (once per step, so "Andere camera" sticks)
+  if ((k==="camera" || k==="match") && ui.camStep!==i){ ui.camStep = i; const want = k==="match" ? "environment" : "user";
+    if (cam.facing!==want){ cam.facing = want; camStop(); } }
   let extra = "", after = "";
   const hint = ui.hintShown ? `<div class="hint-box"><b>Tip:</b> ${esc(s.hint)}</div>`
     : (s.hint ? `<button class="btn ghost" data-act="hint">We komen er niet uit… geef een tip</button>` : "");
@@ -620,6 +906,25 @@ function renderClue(){
     after = `<div class="letters">${sub.tiles.map((li,p)=>`<button class="tile" data-act="letter" data-p="${p}" ${picked.includes(p)?"disabled":""}>${word[li]}</button>`).join("")}</div>
       <button class="btn alt small" data-act="unletter" ${picked.length?"":"disabled"}>⌫ Letter terug</button>
       <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>` + hint;
+  }
+  if (k==="match" && !imgs.has(s.photo)){ // e.g. settings copied from another device without the photo
+    text = `${text}\n\n(De foto van deze plek staat niet op dit apparaat.)`;
+    after = `<button class="btn" data-act="skipStep">Sla deze opdracht over</button>`;
+  }
+  else if (k==="match"){
+    const pic = imgs.get(s.showPhoto ? s.photo : (imgs.has(s.sketch) ? s.sketch : s.photo));
+    extra = `<img class="full ${s.showPhoto ? "" : "sketch"}" src="${pic}" alt="${s.showPhoto ? "Foto" : "Tekening"} van de plek die jullie moeten vinden">`;
+    const tail = `<p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>${hint}
+      <button class="btn ghost" data-act="approve">Ouders: plek goedkeuren</button>`;
+    if (ui.busy) after = `<div class="busy"><span class="glass">🔍</span><p>${esc(ui.busy)}</p></div>`;
+    else if (camOk()) after = `<div class="viewfinder"><video id="vf" class="${cam.facing==="user"?"mirror":""}" playsinline muted autoplay></video>
+        ${ui.ghost ? `<img class="ghost" src="${pic}" alt="">` : ""}<div class="flash" id="flash"></div></div>
+      <div><div class="meter-track" role="img" aria-label="Warm of koud"><span id="meterCover" style="width:${100-hunt.warm*100}%"></span></div>
+        <p class="meter-txt" id="meterTxt" aria-live="polite">${BANDS[hunt.band].t}</p></div>
+      <button class="btn" data-act="huntSnap">📸 Is het hier?</button>
+      <div class="row"><button class="btn alt small" data-act="flip">🔄 Andere camera</button>
+        ${(sub.tries||0) >= 2 ? `<button class="btn alt small" data-act="ghost">👻 ${ui.ghost ? "Spiekplaatje weg" : "Spiekplaatje"}</button>` : ""}</div>` + tail;
+    else after = `<label class="btn">📷 Maak de foto<input type="file" accept="image/*" capture="environment" class="vh" id="huntFile"></label>` + tail;
   }
   if (k==="camera"){
     const shown = sub.styled || sub.photo;
@@ -726,7 +1031,7 @@ function lockEditor(){
 function stepEditor(s, i){
   const t = s.type||"code", note = NOTE_TYPES.includes(t), hasPhoto = imgs.has(s.photo);
   const clueLbl = { code:"Raadsel voor de kinderen", photo:"Tekst bij de foto (mag leeg)", jigsaw:"Tekst bij de puzzel (mag leeg)",
-    scramble:"Uitleg bij de puzzel", camera:"Opdracht: wat moeten ze fotograferen?" }[t];
+    scramble:"Uitleg bij de puzzel", camera:"Opdracht: wat moeten ze fotograferen?", match:"Tekst bij de tekening (mag leeg)" }[t];
   const photoLbl = t==="photo" ? "Foto van de verstopplek (de kinderen zien eerst een ingezoomd stukje uit het midden)"
     : "Foto van de verstopplek (wordt in 9 stukjes gehusseld)";
   return `
@@ -744,9 +1049,22 @@ function stepEditor(s, i){
           ${hasPhoto ? `<img class="thumb" src="${imgs.get(s.photo)}" alt="">` : `<span class="muted" style="flex:0 0 auto">Nog geen foto</span>`}
           <label class="btn alt small">📷 ${hasPhoto?"Andere foto":"Kies of maak foto"}<input type="file" accept="image/*" class="vh" data-photo="${i}"></label>
         </div></div>` : ""}
+      ${t==="match" ? `<div><span class="lbl">Foto van de plek. Maak hem op ooghoogte van de kinderen; zij zien er een tekening van.</span>
+        <div class="row" style="align-items:center">
+          ${hasPhoto ? `<img class="thumb" src="${imgs.get(imgs.has(s.sketch) ? s.sketch : s.photo)}" alt="">` : `<span class="muted" style="flex:0 0 auto">Nog geen foto</span>`}
+          <label class="btn alt small">📷 ${hasPhoto?"Andere foto":"Kies of maak foto"}<input type="file" accept="image/*" capture="environment" class="vh" data-photo="${i}"></label>
+        </div>
+        ${ui.matchInfo[i] ? `<p class="hint-box" style="font-size:15px;margin-top:8px">${esc(ui.matchInfo[i])}</p>` : ""}</div>
+      <label class="check"><input type="checkbox" data-f="showPhoto" ${s.showPhoto?"checked":""}> Laat de echte foto zien in plaats van een tekening</label>
+      ${hasPhoto ? `<label class="btn alt small">🧪 Probeer uit: maak een testfoto van de plek<input type="file" accept="image/*" capture="environment" class="vh" data-try="${i}"></label>` : ""}` : ""}
       ${note ? `<div><label class="lbl" for="place-${i}">Verstopplek (alleen voor jou)</label><input type="text" id="place-${i}" data-f="place" value="${esc(s.place)}"></div>` : ""}
       <div><label class="lbl" for="clue-${i}">${clueLbl}</label><textarea id="clue-${i}" data-f="clue">${esc(s.clue)}</textarea></div>
-      ${t==="camera" ? `<label class="check"><input type="checkbox" data-f="ai" ${s.ai?"checked":""}> Knop “Maak er detectives van” tonen</label>` : `
+      ${t==="camera" ? `<label class="check"><input type="checkbox" data-f="ai" ${s.ai?"checked":""}> Knop “Maak er detectives van” tonen</label>`
+      : t==="match" ? `<div class="row">
+        <div><label class="lbl" for="level-${i}">Hoe precies moet de foto lijken?</label>
+          <select id="level-${i}" data-f="level">${Object.entries(MATCH_LEVELS).map(([v,l])=>`<option value="${v}" ${v===(s.level||"normal")?"selected":""}>${l.name}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="hint-${i}">Tip</label><input type="text" id="hint-${i}" data-f="hint" value="${esc(s.hint)}"></div>
+      </div>` : `
       <div class="row">
         <div><label class="lbl" for="code-${i}">${t==="scramble"?"Woord om te puzzelen":"Geheime code op het briefje"}</label><input type="text" id="code-${i}" data-f="code" value="${esc(s.code)}" class="type" style="text-transform:uppercase"></div>
         <div><label class="lbl" for="hint-${i}">Tip</label><input type="text" id="hint-${i}" data-f="hint" value="${esc(s.hint)}"></div>
@@ -768,7 +1086,8 @@ function renderSetup(){
     ${lockEditor()}
     <h2 style="font-size:20px;margin-top:8px">Opdrachten</h2>
     <p class="muted" style="font-size:16px"><b>Raadsel + briefje</b>: zoek de plek, typ de code. <b>Waar is dit?</b>: een ingezoomde foto van de plek. <b>Fotopuzzel</b>: puzzel de foto van de plek in elkaar.
-      <b>Letterpuzzel</b>: zet de letters van een woord op volgorde. <b>Foto-opdracht</b>: de kinderen maken zelf een foto; die komt in het fotoalbum aan het eind.</p>
+      <b>Letterpuzzel</b>: zet de letters van een woord op volgorde. <b>Foto-opdracht</b>: de kinderen maken zelf een foto; die komt in het fotoalbum aan het eind.
+      <b>Zoek deze plek</b>: de kinderen zien een tekening van een plek, zoeken hem en fotograferen hem; een meter zegt of ze warm of koud zijn.</p>
     ${cfg.steps.map(stepEditor).join("")}
     <button class="btn alt" data-act="add">+ Opdracht toevoegen</button>
     <h2 style="font-size:20px;margin-top:8px">Verdachten</h2>
@@ -800,6 +1119,14 @@ function renderSetup(){
     <p class="msg" id="aiMsg" aria-live="polite">${esc(aiStatus())}</p>
     <div id="aiTest" class="stack" style="gap:8px"></div>
     <div><label class="lbl" for="ai-prompt">Opdracht aan de AI</label><textarea id="ai-prompt" style="min-height:120px">${esc(ai.prompt)}</textarea></div>
+    <h2 style="font-size:20px;margin-top:8px">Zoek deze plek: AI kijkt mee (optioneel)</h2>
+    <p class="muted" style="font-size:16px">De tablet keurt de foto eerst zelf, zonder internet. Keurt hij hem af, dan kan dezelfde dienst als hierboven nog meekijken
+      met een model dat foto's bekijkt. Beide foto's gaan dan naar die dienst (minder dan een cent per keer).</p>
+    <label class="check"><input type="checkbox" id="ai-verify" ${ai.verify?"checked":""}> AI laten meekijken als de tablet de foto afkeurt</label>
+    <div><label class="lbl" for="ai-vision">Model dat foto's bekijkt</label>
+      <input type="text" id="ai-vision" list="ai-vision-list" spellcheck="false" placeholder="bijv. gpt-4.1-mini" value="${esc(ai.visionModel)}">
+      <datalist id="ai-vision-list">${ai.models.filter(m=>!m.img).map(m=>`<option value="${esc(m.id)}">`).join("")}</datalist></div>
+    <p class="muted" style="font-size:14px">${aiVerifyReady() ? "✓ De AI kijkt mee." : ai.verify && !aiKey() ? "Nog geen sleutel: alleen de tablet keurt de foto's." : ai.verify ? "Vul een model in." : "Uit: alleen de tablet keurt de foto's."}</p>
     <button class="btn" data-act="saveSetup">Opslaan</button>
     <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
     <p class="muted" style="font-size:16px">Schrijf elke code op een briefje en leg het op de juiste plek. Hoofdletters of spaties maken niet uit.</p>
@@ -833,6 +1160,7 @@ function render(){
   if (ui.overlay) html += ui.overlay;
   app.innerHTML = html;
   camAttach();
+  if (document.getElementById("vf") && kind(cfg.steps[prog.index]||{})==="match") huntLoop();
   const ci = document.getElementById("code");
   if (ci && !ui.overlay && kind(cfg.steps[prog.index]||{})==="code") ci.focus({preventScroll:true});
 }
@@ -857,6 +1185,8 @@ function collectAi(){
   ai.style = document.getElementById("ai-style").value;
   ai.model = document.getElementById("ai-model").value.trim();
   ai.prompt = document.getElementById("ai-prompt").value.trim() || AI_DEFAULT.prompt;
+  ai.visionModel = document.getElementById("ai-vision").value.trim();
+  ai.verify = document.getElementById("ai-verify").checked;
 }
 const aiReady = () => !!(aiKey() && ai.base && ai.model);
 const aiStatus = () => aiReady() ? `✓ Ingesteld: ${PROVIDERS[ai.provider]?.name || ai.base} · ${ai.model}. Wordt meteen bewaard.`
@@ -867,7 +1197,8 @@ function stepProblem(s){
   const t = s.type||"code";
   if (t==="camera") return s.clue ? "" : "mist nog een opdracht";
   if (t==="scramble") return norm(s.code).length>=2 ? "" : "mist nog een woord om te puzzelen";
-  if ((t==="photo"||t==="jigsaw") && !imgs.has(s.photo)) return "mist nog een foto";
+  if ((t==="photo"||t==="jigsaw"||t==="match") && !imgs.has(s.photo)) return "mist nog een foto";
+  if (t==="match") return "";
   if (!norm(s.code)) return "mist nog een code";
   return t==="code" && !s.clue ? "mist nog een raadsel" : "";
 }
@@ -883,7 +1214,7 @@ function newProg(team, phase){
 function solveStep(){
   const s = cfg.steps[prog.index], k = kind(s), last = prog.index===cfg.steps.length-1;
   beep(true); confetti();
-  const stamp = { scramble:"PUZZEL OPGELOST!", camera:"FOTO IN HET DOSSIER!" }[k] || "CODE GOED!";
+  const stamp = { scramble:"PUZZEL OPGELOST!", camera:"FOTO IN HET DOSSIER!", match:"PLEK GEVONDEN!" }[k] || "CODE GOED!";
   ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="${stamp}"><div class="paper stack"><span class="tape"></span>
     <span class="stamp" style="color:var(--good);border-color:var(--good)">${stamp}</span>
     ${s.evidence ? `<p class="type muted">BEWIJSSTUK #${prog.index+1}</p><p class="riddle" style="font-size:20px">${esc(s.evidence)}</p>` : ""}
@@ -934,13 +1265,18 @@ app.addEventListener("click", async e=>{
       catch(err){ console.warn(err); if(useAi){ ui.aiError = err.message || String(err); ui.aiLog = err.log; } else ui.msg = "Dat lukte niet. Gebruik gewoon de gewone foto!"; }
       ui.busy=""; saveProg(); render(); break; }
     case "snap": case "timer": camSnap(act==="timer"); break;
+    case "huntSnap": huntSnap(); break;
+    case "ghost": ui.ghost = !ui.ghost; render(); break;
+    case "approve": approveOverlay(); break;
+    case "closeOverlay": ui.overlay=null; render(); break;
+    case "skipStep": solveStep(); break;
     case "flip": cam.facing = cam.facing==="user" ? "environment" : "user"; camStop(); render(); break;
     case "retake": ui.aiError=""; dropImage(sub.photo); dropImage(sub.styled); prog.sub={}; saveProg(); render(); break;
     case "unstyle": dropImage(sub.styled); delete sub.styled; saveProg(); render(); break;
     case "usePhoto":
       prog.photos.push({ id: sub.styled||sub.photo, orig: sub.photo }); prog.sub={}; saveProg(); solveStep(); break;
     case "next":
-      ui.overlay=null; ui.hintShown=false; ui.zoom=0; ui.aiError=""; prog.sub={};
+      ui.overlay=null; ui.hintShown=false; ui.zoom=0; ui.aiError=""; ui.ghost=false; hunt.warm=0; hunt.band=0; prog.sub={};
       prog.index++; prog.phase = prog.index>=cfg.steps.length ? "accuse" : "clue";
       saveProg(); render(); scrollTo(0,0); break;
     case "accuse": {
@@ -996,6 +1332,8 @@ app.addEventListener("click", async e=>{
       collectSetup(); save(KEY_AI, ai);
       const bad = cfg.steps.findIndex(s=>stepProblem(s));
       if(bad>=0){ setupMsg(`Stap ${bad+1} ${stepProblem(cfg.steps[bad])}.`); return; }
+      for (const st of cfg.steps) if (st.type==="match" && imgs.has(st.photo) && !imgs.has(st.sketch)){ // e.g. a "Waar is dit?" photo reused
+        setupMsg("Tekening wordt gemaakt…"); try{ st.sketch = await sketchOf(st.photo); }catch(err){} }
       save(KEY_CFG,cfg); gcImages();
       if(prog.index>=cfg.steps.length && prog.phase==="clue"){ prog.index=0; prog.sub={}; saveProg(); }
       render(); setupMsg("Opgeslagen."); break; }
@@ -1021,18 +1359,42 @@ app.addEventListener("change", async e=>{
   const t=e.target;
   if(t.matches('select[data-f="type"]') || t.id==="ai-style"){ collectSetup(); if(t.id==="ai-style") save(KEY_AI, ai); render(); return; }
   if(t.id==="ai-model"){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); return; }
+  if(t.id==="ai-verify"){ collectSetup(); save(KEY_AI, ai); render(); return; }
   if(t.id==="lock-mode"){ collectSetup(); ui.lockDraft=t.value; render(); document.getElementById("lock-mode")?.scrollIntoView({block:"center"}); return; }
   if(t.id==="ai-provider"){
     collectSetup(); const p = PROVIDERS[t.value];
     ai.provider = t.value; ai.models = [];
-    if (t.value!=="custom"){ ai.base = p.base; ai.style = p.style; ai.model = p.model; }
+    if (t.value!=="custom"){ ai.base = p.base; ai.style = p.style; ai.model = p.model; ai.visionModel = p.vision; }
     save(KEY_AI, ai); render(); return;
   }
   if(t.dataset.photo!==undefined && t.files[0]){
     collectSetup(); setupMsg("Foto wordt verwerkt…");
-    try{ cfg.steps[+t.dataset.photo].photo = await storeImage(t.files[0], "p-", true); ui.msg=""; render(); }
-    catch(err){ setupMsg("Die foto kon niet geladen worden."); }
+    const i=+t.dataset.photo, st=cfg.steps[i], match = st.type==="match";
+    try{ st.photo = await storeImage(t.files[0], "p-", !match);
+      if (match){ setupMsg("Tekening wordt gemaakt…"); st.sketch = await sketchOf(st.photo); ui.matchInfo[i] = qualityText(await spotQuality(st.photo)); }
+      ui.msg=""; render(); }
+    catch(err){ console.warn(err); setupMsg("Die foto kon niet geladen worden."); }
     return;
+  }
+  if(t.dataset.try!==undefined && t.files[0]){ // parents try a hunt photo: what would the tablet (and the AI) say?
+    collectSetup(); const i=+t.dataset.try, st=cfg.steps[i]; ui.matchInfo[i]="Testfoto wordt bekeken…"; render();
+    let id;
+    try{
+      id = await storeImage(t.files[0], "t-", false);
+      const m = await photoMatch(st.photo, id), pass = passFor(st);
+      let txt = `Testfoto: ${m.inliers} punten komen overeen (nodig: ${pass}). ${m.inliers>=pass ? "✓ De tablet keurt hem goed." : "✗ De tablet keurt hem af."}`;
+      if (aiVerifyReady()){
+        try{ const r = await aiSameSpot(st.photo, id); txt += ` AI (${ai.visionModel}): ${r.same ? "✓ zelfde plek" : "✗ andere plek"}${r.tip ? `. Tip: “${r.tip}”` : ""}`; }
+        catch(err){ txt += ` De AI lukte niet: ${err.message}`; }
+      } else if (m.inliers<pass) txt += " Was dit wél de goede plek? Kies dan ‘Makkelijk’, of zet hieronder de AI aan om te laten meekijken.";
+      ui.matchInfo[i] = txt;
+    } catch(err){ console.warn(err); ui.matchInfo[i] = "Die testfoto kon niet bekeken worden."; }
+    dropImage(id); render(); return;
+  }
+  if(t.id==="huntFile" && t.files[0]){
+    ui.msg=""; let id;
+    try{ id = await storeImage(t.files[0], "k-", false); }catch(err){ ui.msg="Dat lukte niet. Probeer het nog een keer."; return render(); }
+    return checkSpot(id);
   }
   if(t.id==="cam" && t.files[0]){
     const file=t.files[0]; ui.busy="Foto wordt ontwikkeld…"; ui.msg=""; render();
@@ -1055,6 +1417,14 @@ app.addEventListener("submit", e=>{
       input.select();
     }
   }
+  if(e.target.id==="approveForm") (async()=>{
+    const val=document.getElementById("approve").value.trim(), pin = lock.mode==="pin" && lock.hash, m=document.getElementById("approveMsg");
+    if(Date.now() < ui.lockUntil){ m.textContent=`Te vaak fout. Wacht ${Math.ceil((ui.lockUntil-Date.now())/1000)} seconden.`; return; }
+    const ok = pin ? (await hashPin(val, lock.salt)) === lock.hash : val!=="" && +val === ui.approveQ.a*ui.approveQ.b;
+    if(ok){ ui.fails=0; ui.overlay=null; hunt.warm=0; hunt.band=0; ui.ghost=false; return solveStep(); }
+    if(++ui.fails % 5 === 0) ui.lockUntil = Date.now() + 30000;
+    pin ? (m.textContent="Die pincode klopt niet.") : approveOverlay("Dat is niet goed. Hier is een nieuwe som.");
+  })();
   if(e.target.id==="gateForm") (async()=>{
     const val=document.getElementById("gate").value.trim(), pin = lock.mode==="pin" && lock.hash && !ui.recover;
     if(Date.now() < ui.lockUntil){ ui.msg=`Te vaak fout. Wacht ${Math.ceil((ui.lockUntil-Date.now())/1000)} seconden.`; return render(); }
@@ -1069,7 +1439,7 @@ app.addEventListener("submit", e=>{
 
 app.addEventListener("input", e=>{
   if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); }
-  if(/^ai-(key|base|model|prompt)$/.test(e.target.id)){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); }
+  if(/^ai-(key|base|model|prompt|vision)$/.test(e.target.id)){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); }
 });
 
 window.claude?.hot?.snapshot?.(()=>({ ui:{} })); // never restore an unlocked menu
