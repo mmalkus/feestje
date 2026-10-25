@@ -44,4 +44,20 @@ Each step in the setup has a type:
     Use a dedicated key with a spending limit. The photo is sent to the chosen service. The service must allow calls
     from a browser (CORS); if it doesn't, the button falls back to the on-device version and shows a message.
 
+- **Zoek deze plek (foto-match)**: upload a photo of a spot (take it at the kids' eye height). The kids see a pencil drawing of it
+  (or the real photo, if you tick that), find the spot and photograph it with the back camera.
+  - A **warmer/colder meter** under the viewfinder compares the live camera image with your photo a few times a second
+    (❄️ IJskoud → 🔥 HEET!) and ticks when they get warmer.
+  - "📸 Is het hier?" checks the photo **on the device, offline**: it finds corners in both photos, matches them and counts how many
+    agree on one camera move (ORB-style features + RANSAC, no library). "Hoe precies" sets how many must agree:
+    Makkelijk 12, Normaal 18, Streng 30. In tests, unrelated photos reached 5–11 and photos of the same spot 17–270.
+  - If the device rejects it and an API key is set, an **AI second opinion** is asked (Ouders → "Zoek deze plek: AI kijkt mee"):
+    both photos go to `POST /chat/completions` of the chosen service with a vision model (default `gpt-4.1-mini`,
+    `google/gemini-2.5-flash` on OpenRouter, `mistral-medium-latest` on Mistral). Its tip is shown when it says no.
+  - After two misses a "👻 Spiekplaatje" button lays the drawing over the camera image.
+  - "Ouders: plek goedkeuren" (sum or PIN) always lets a parent pass the step.
+  - In the setup, the app rates how recognisable the spot is, and "🧪 Probeer uit" lets you take a test photo to see the score
+    (and the AI's answer). Plain walls and doors are hard to recognise; pick spots with things and patterns.
+  - Found spots end up in the photo album on the final screen.
+
 Photos are stored in IndexedDB on the device and are not part of the copy/paste export.
