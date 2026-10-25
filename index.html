@@ -150,15 +150,14 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .viewfinder .flash.go{animation:flash .5s ease-out}
 @keyframes flash{from{opacity:1} to{opacity:0}}
 /* "Zoek deze plek": the drawing, the viewfinder and the snap button share one phone screen, so nobody scrolls while aiming.
-   The room left after the text and buttons (about 450px) goes 45/55 to the drawing and the viewfinder. */
+   The question comes on its own screen first; the room left after the buttons (about 300px) goes 45/55 to the drawing and the viewfinder. */
 .full.sketch{max-height:42vh; background:#fff}
 .paper.hunt{padding-block:16px}
-.paper.hunt .riddle{font-size:clamp(16px, 4.6vw, 20px); line-height:1.4}
-.paper.hunt .full.sketch{max-height:min(42vh, max(110px, calc((100vh - 450px) * .45)))}
-.viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62vh, max(150px, calc((100vh - 450px) * .55)))))}
+.paper.hunt .full.sketch{max-height:min(42vh, max(110px, calc((100vh - 300px) * .45)))}
+.viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62vh, max(150px, calc((100vh - 300px) * .55)))))}
 @supports (height:100svh){
-  .paper.hunt .full.sketch{max-height:min(42svh, max(110px, calc((100svh - 450px) * .45)))}
-  .viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62svh, max(150px, calc((100svh - 450px) * .55)))))}
+  .paper.hunt .full.sketch{max-height:min(42svh, max(110px, calc((100svh - 300px) * .45)))}
+  .viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62svh, max(150px, calc((100svh - 300px) * .55)))))}
 }
 .viewfinder .meter{position:absolute; left:0; right:0; bottom:0; padding:22px 10px 6px; pointer-events:none;
   background:linear-gradient(transparent, rgba(0,0,0,.6))}
@@ -1043,10 +1042,15 @@ function renderClue(){
     text = `${text}\n\n(De foto van deze plek staat niet op dit apparaat.)`;
     after = `<button class="btn" data-act="skipStep">Sla deze opdracht over</button>`;
   }
+  else if (k==="match" && !sub.go){ // first the question on its own, then the drawing and the camera together
+    after = `<button class="btn" data-act="huntGo">🔍 Zoeken maar!</button>`;
+  }
   else if (k==="match"){
+    text = ""; slot = "";
     const pic = imgs.get(s.showPhoto ? s.photo : (imgs.has(s.sketch) ? s.sketch : s.photo));
     extra = `<img class="full ${s.showPhoto ? "" : "sketch"}" src="${pic}" alt="${s.showPhoto ? "Foto" : "Tekening"} van de plek die jullie moeten vinden">`;
     const tail = `<p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>${hint}
+      <button class="btn ghost" data-act="huntBack">📜 Lees de vraag nog eens</button>
       <button class="btn ghost" data-act="approve">Ouders: plek goedkeuren</button>`;
     if (ui.busy) after = `<div class="busy"><span class="glass">🔍</span><p>${esc(ui.busy)}</p></div>`;
     else if (camOk()) after = `<div class="viewfinder hunt"><video id="vf" class="${cam.facing==="user"?"mirror":""}" playsinline muted autoplay></video>
@@ -1087,11 +1091,11 @@ function renderClue(){
 
   return folder(`${(prog.team||"DETECTIVES").toUpperCase()} · STAP ${i+1}/${n}`, `
     <div class="progress" aria-label="Stap ${i+1} van ${n}">${dots}</div>
-    <div class="paper ${k==="match" ? "hunt" : ""}"><span class="tape"></span>
+    <div class="paper ${k==="match" && sub.go ? "hunt" : ""}"><span class="tape"></span>
       <p class="type muted" style="margin-bottom:8px">${label} ${i+1}</p>
       ${text ? `<p class="riddle">${esc(text)}</p>` : ""}
       ${extra}
-      ${sayBtn(slot)}
+      ${slot ? sayBtn(slot) : ""}
     </div>
     ${after}
     ${evidenceList(i)}
@@ -1453,6 +1457,8 @@ app.addEventListener("click", async e=>{
       if (prog.phase!=="start" && !b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker weten? Tik nog een keer"; return; }
       prog = newProg((document.getElementById("team")?.value||prog.team||"").trim(), "start");
       ui.hintShown=false; ui.zoom=0; saveProg(); render(); scrollTo(0,0); break;
+    case "huntGo": prog.sub.go = true; saveProg(); render(); scrollTo(0,0); break;
+    case "huntBack": prog.sub.go = false; saveProg(); render(); scrollTo(0,0); break;
     case "hint": ui.hintShown=true; render(); say(`hint${prog.index}`); break;
     case "say": getAudio(); say(b.dataset.slot); break;
     case "zoomOut": ui.zoom=Math.min(ui.zoom+1, ZOOMS.length-1); render(); break;
