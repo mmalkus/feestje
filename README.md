@@ -60,4 +60,16 @@ Each step in the setup has a type:
     (and the AI's answer). Plain walls and doors are hard to recognise; pick spots with things and patterns.
   - Found spots end up in the photo album on the final screen.
 
+## Voorlezen (text-to-speech)
+Ouders → "Voorlezen": a voice reads the story, riddles, tips, evidence and the ending aloud. Every line is spoken
+**before the game starts** and stored in IndexedDB, so no internet is needed while playing. "🎙 Alles nu inspreken"
+does it in the setup; anything still missing (e.g. the closing line with the team name, or lines changed since) is
+spoken when the kids tap Start, behind a progress screen. If that fails, they can retry or "Start zonder stem".
+Clips are reused as long as the text and the voice settings stay the same. A "🔊 Nog een keer" button replays a line.
+- **ElevenLabs** (default, best Dutch): custom voices via Voice Cloning (clone your own voice), Voice Design, or the
+  Voice Library. "Stemmen ophalen" lists your voices (★ = your own). Models: `eleven_multilingual_v2`, `eleven_flash_v2_5`, `eleven_v3`.
+- **OpenAI** `gpt-4o-mini-tts`: fixed voices, but you can describe how it should sound (narrator style).
+- **Anders**: any server with an OpenAI-style `POST /audio/speech` (e.g. a self-hosted voice-cloning server); must allow CORS.
+Keys are stored per service only in that browser's localStorage, like the image key.
+
 Photos are stored in IndexedDB on the device and are not part of the copy/paste export.
