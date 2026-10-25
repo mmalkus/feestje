@@ -142,8 +142,8 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .zoom,.jig{width:min(100%, 62vh); margin-inline:auto}
 .zoom{overflow:hidden; border-radius:6px; aspect-ratio:1; background:var(--ink); margin-top:12px}
 .zoom img{width:100%; height:100%; object-fit:cover; display:block; transition:transform .5s}
-.jig{display:grid; grid-template-columns:repeat(3,1fr); gap:3px; aspect-ratio:1; background:var(--ink); padding:3px; border-radius:6px; margin-top:12px}
-.jig button{border:0; padding:0; background-size:300% 300%; cursor:pointer; border-radius:2px}
+.jig{display:grid; grid-template-columns:repeat(var(--c,3),1fr); grid-template-rows:repeat(var(--r,3),1fr); gap:3px; aspect-ratio:1; background:var(--ink); padding:3px; border-radius:6px; margin-top:12px}
+.jig button{border:0; padding:0; background-size:calc(var(--c,3)*100%) calc(var(--r,3)*100%); cursor:pointer; border-radius:2px}
 .jig button.sel{outline:5px solid var(--tape); outline-offset:-5px}
 .jig button{touch-action:none; position:relative}
 .jig button.drag{z-index:2; opacity:.85; box-shadow:0 8px 18px rgba(0,0,0,.45); cursor:grabbing}
@@ -209,6 +209,8 @@ const TYPES = { code:"Raadsel + briefje", photo:"Waar is dit? (foto)", jigsaw:"F
 // pass = corners that must agree between the parent's photo and the kids' photo (unrelated photos reach about 5–11)
 const MATCH_LEVELS = { easy:{ name:"Makkelijk (kleine kinderen)", pass:12 }, normal:{ name:"Normaal", pass:18 }, strict:{ name:"Streng (precies dezelfde foto)", pass:30 } };
 const passFor = s => (MATCH_LEVELS[s.level] || MATCH_LEVELS.normal).pass;
+const JIG_SIZES = ["3x3","3x4","4x4","4x5","5x5"]; // photo puzzle: columns x rows
+const jigSize = s => { const [c, r] = (JIG_SIZES.includes(s.grid) ? s.grid : JIG_SIZES[0]).split("x").map(Number); return { c, r }; };
 const NOTE_TYPES = ["code","photo","jigsaw"];
 
 const DEFAULT = {
@@ -1038,14 +1040,15 @@ function renderClue(){
     after = (ui.zoom < ZOOMS.length-1 ? `<button class="btn alt" data-act="zoomOut">🔍 Zoom een beetje uit</button>` : "") + hint + codeForm();
   }
   if (k==="jigsaw"){
-    if (!sub.order){ sub.order = scrambled([...Array(9).keys()], r=>r.every((v,j)=>v===j)); saveProg(); }
+    const { c, r } = jigSize(s), n = c*r;
+    if (sub.order?.length!==n){ sub.order = scrambled([...Array(n).keys()], o=>o.every((v,j)=>v===j)); sub.sel = null; saveProg(); }
     if (sub.solved){
       text = JIG_DONE; slot = `jig${i}`;
       extra = `<img class="full" src="${imgs.get(s.photo)}" alt="De verstopplek">`;
       after = hint + codeForm();
     } else {
-      extra = `<div class="jig">${sub.order.map((pc,pos)=>`<button data-act="tile" data-p="${pos}" class="${sub.sel===pos?"sel":""}" aria-label="Puzzelstukje ${pos+1}"
-        style="background-image:url(${imgs.get(s.photo)});background-position:${(pc%3)*50}% ${Math.floor(pc/3)*50}%"></button>`).join("")}</div>`;
+      extra = `<div class="jig" style="--c:${c};--r:${r}">${sub.order.map((pc,pos)=>`<button data-act="tile" data-p="${pos}" class="${sub.sel===pos?"sel":""}" aria-label="Puzzelstukje ${pos+1}"
+        style="background-image:url(${imgs.get(s.photo)});background-position:${(pc%c)*100/(c-1)}% ${Math.floor(pc/c)*100/(r-1)}%"></button>`).join("")}</div>`;
       after = hint;
     }
   }
@@ -1192,7 +1195,7 @@ function stepEditor(s, i){
   const clueLbl = { code:"Raadsel voor de kinderen", photo:"Tekst bij de foto (mag leeg)", jigsaw:"Tekst bij de puzzel (mag leeg)",
     scramble:"Uitleg bij de puzzel", camera:"Opdracht: wat moeten ze fotograferen?", match:"Tekst bij de tekening (mag leeg)" }[t];
   const photoLbl = t==="photo" ? "Foto van de verstopplek (de kinderen zien eerst een ingezoomd stukje uit het midden)"
-    : "Foto van de verstopplek (wordt in 9 stukjes gehusseld)";
+    : `Foto van de verstopplek (wordt in ${jigSize(s).c*jigSize(s).r} stukjes gehusseld)`;
   const open = openSteps.has(s), problem = stepProblem(s), summary = s.place || s.code || String(s.clue||"").split("\n")[0];
   return `
     <div class="step-edit stack${open?"":" closed"}" style="gap:10px" data-i="${i}">
@@ -1212,6 +1215,8 @@ function stepEditor(s, i){
           ${hasPhoto ? `<img class="thumb" src="${imgs.get(s.photo)}" alt="">` : `<span class="muted" style="flex:0 0 auto">Nog geen foto</span>`}
           <label class="btn alt small">📷 ${hasPhoto?"Andere foto":"Kies of maak foto"}<input type="file" accept="image/*" class="vh" data-photo="${i}"></label>
         </div></div>` : ""}
+      ${t==="jigsaw" ? `<div><label class="lbl" for="grid-${i}">Aantal puzzelstukjes</label>
+        <select id="grid-${i}" data-f="grid">${JIG_SIZES.map(g=>{ const [c, r] = g.split("x"); return `<option value="${g}" ${g===(JIG_SIZES.includes(s.grid) ? s.grid : JIG_SIZES[0])?"selected":""}>${c} × ${r} (${c*r} stukjes)</option>`; }).join("")}</select></div>` : ""}
       ${t==="match" ? `<div><span class="lbl">Foto van de plek. Maak hem op ooghoogte van de kinderen; zij zien er een tekening van.</span>
         <div class="row" style="align-items:center">
           ${hasPhoto ? `<img class="thumb" src="${imgs.get(imgs.has(s.sketch) ? s.sketch : s.photo)}" alt="">` : `<span class="muted" style="flex:0 0 auto">Nog geen foto</span>`}
@@ -1687,7 +1692,7 @@ app.addEventListener("click", async e=>{
 
 app.addEventListener("change", async e=>{
   const t=e.target;
-  if(t.matches('select[data-f="type"]') || t.id==="ai-style"){ collectSetup(); if(t.id==="ai-style") save(KEY_AI, ai); render(); return; }
+  if(t.matches('select[data-f="type"], select[data-f="grid"]') || t.id==="ai-style"){ collectSetup(); if(t.id==="ai-style") save(KEY_AI, ai); render(); return; }
   if(t.id==="ai-model"){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); return; }
   if(t.id==="ai-verify"){ collectSetup(); save(KEY_AI, ai); render(); return; }
   if(t.id==="tts-on"){ collectSetup(); save(KEY_TTS, tts); render(); document.getElementById("tts-on")?.scrollIntoView({block:"center"}); return; }
