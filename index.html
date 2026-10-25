@@ -210,6 +210,13 @@ const AI_DEFAULT = {
   prompt: "Turn this photo into a bright, friendly children's picture-book illustration in which everyone is a detective: deerstalker hats, magnifying glasses, little trench coats, a playful mystery atmosphere with a birthday cake hidden somewhere. Keep exactly the same people, their faces, hair, poses and the number of people. Cheerful, warm, kid-friendly, no text."
 };
 
+// Mistral's image tool never sees the photo: it only gets the text prompt the agent writes.
+// So the agent has to put a very precise description of the photo into that prompt.
+const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as possible to the original photo. The image_generation tool CANNOT see the photo; it only gets your text prompt. So: 1) Study the attached photo closely. 2) Call the image_generation tool with ONE long, concrete English prompt that describes the photo exactly: the camera angle and framing (close-up, half body, full body), how many people there are and, for each person from left to right, their position, approximate age, build, skin tone, face shape, hair colour, length and style, glasses, facial expression, pose, what they hold, and their clothes with exact colours and patterns; then the background, setting, lighting and main colours. Then add the requested style changes on top of that, without changing the people, their clothes colours, the composition or the background. Ask for the same aspect ratio as the photo. 3) You MUST call the tool: never answer with only text and never describe an image you did not generate. After the tool has made the picture, reply with one short sentence.";
+const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
+
+// Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
+const VERSION = 15;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -355,17 +362,17 @@ async function aiDraw(id){
   } else if (ai.style === "mistral"){
     // Mistral can't edit a photo: the agent looks at it and draws a new picture with its image_generation tool.
     const agent = async fresh => {
-      if (fresh || !ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base || ai.agent.key!==aiKey().slice(-6) || ai.agent.v!==2){
+      if (fresh || !ai.agent || ai.agent.model!==ai.model || ai.agent.base!==ai.base || ai.agent.key!==aiKey().slice(-6) || ai.agent.v!==3){
         const a = await api("/agents", { json:{ model:ai.model, name:"Speurtocht tekenaar", description:"Maakt detective-plaatjes van teamfoto's",
-          instructions:"You are an illustrator. Look carefully at the attached photo (number of people, hair, clothes, poses). Then you MUST call the image_generation tool to draw the requested picture of these people. Never answer with only text and never describe an image you did not generate. After the tool has made the picture, reply with one short sentence.",
+          instructions: MISTRAL_AGENT,
           tools:[{ type:"image_generation" }] } });
-        ai.agent = { id:a.id, model:ai.model, base:ai.base, key:aiKey().slice(-6), v:2 }; save(KEY_AI, ai);
+        ai.agent = { id:a.id, model:ai.model, base:ai.base, key:aiKey().slice(-6), v:3 }; save(KEY_AI, ai);
       }
       return ai.agent.id;
     };
-    const photo = await blobToDataUrl(blob);
+    const photo = await blobToDataUrl(blob), request = `${prompt}\n\n${MISTRAL_ASK}`;
     const ask = async (id, withPhoto) => api("/conversations", { json:{ agent_id:id, stream:false, inputs:[{ role:"user", content:
-      withPhoto ? [{ type:"text", text:prompt }, { type:"image_url", image_url:photo }] : prompt }] } });
+      withPhoto ? [{ type:"text", text:request }, { type:"image_url", image_url:photo }] : prompt }] } });
     let j;
     try{ j = await ask(await agent(false), true); }
     catch(e){
@@ -799,7 +806,7 @@ const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenEle
 const fsLabel = () => isFs() ? "Klein scherm" : "⛶ Volledig scherm";
 function goFull(){ try{ (root.requestFullscreen||root.webkitRequestFullscreen).call(root)?.catch?.(()=>{}); }catch(e){} }
 function exitFull(){ try{ (document.exitFullscreen||document.webkitExitFullscreen).call(document)?.catch?.(()=>{}); }catch(e){} }
-["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev, ()=>{ const b=document.querySelector(".fs-btn"); if(b) b.textContent=fsLabel(); }));
+["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev, ()=>{ document.querySelectorAll("[data-act=fullscreen]").forEach(b=>b.textContent=fsLabel()); }));
 
 /* ---------- wake lock ---------- */
 // The lock is dropped whenever the page is hidden, so it's re-requested on return and on any tap (some browsers need one).
@@ -1069,6 +1076,9 @@ function stepEditor(s, i){
 function renderSetup(){
   const notes = cfg.steps.map((s,i)=>NOTE_TYPES.includes(s.type||"code") ? `<div><span>${i+1}. ${esc(s.place)}</span><b>${esc(norm(s.code))}</b></div>` : "").join("");
   return folder("INSTELLINGEN · OUDERS", `
+    ${canFs ? `<button class="btn alt small" data-act="fullscreen">${fsLabel()}</button>`
+      : (window.navigator.standalone || matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches) ? ""
+      : `<p class="muted" style="font-size:15px">Volledig scherm: open het spel in Safari, tik op Deel → <b>Zet op beginscherm</b> en start het vanaf daar.</p>`}
     <h2>Speurtocht instellen</h2>
     <p class="muted" style="font-size:16px">Alles wordt bewaard op dít apparaat. Stel het dus in op de telefoon of tablet waarmee de kinderen spelen.</p>
     <div><label class="lbl" for="s-title">Titel</label><input type="text" id="s-title" value="${esc(cfg.title)}"></div>
@@ -1134,6 +1144,7 @@ function renderSetup(){
       <button class="btn alt small" data-act="resetAll">Voorbeeld herstellen</button>
     </div>
     <button class="btn ghost" data-act="back">Terug naar het spel</button>
+    <p class="muted" style="font-size:14px;text-align:center">Versie ${VERSION}</p>
   `);
 }
 
