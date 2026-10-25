@@ -129,6 +129,9 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .jig{display:grid; grid-template-columns:repeat(3,1fr); gap:3px; aspect-ratio:1; background:var(--ink); padding:3px; border-radius:6px; margin-top:12px}
 .jig button{border:0; padding:0; background-size:300% 300%; cursor:pointer; border-radius:2px}
 .jig button.sel{outline:5px solid var(--tape); outline-offset:-5px}
+.jig button{touch-action:none; position:relative}
+.jig button.drag{z-index:2; opacity:.85; box-shadow:0 8px 18px rgba(0,0,0,.45); cursor:grabbing}
+.jig button.over{outline:5px dashed var(--tape); outline-offset:-5px}
 .full{max-width:100%; max-height:62vh; border-radius:6px; display:block; margin:12px auto 0}
 .slots{display:flex; gap:5px; justify-content:center; margin-top:14px}
 .slot{flex:0 1 40px; min-width:0; height:50px; border-bottom:4px solid var(--ink); display:flex; align-items:flex-end; justify-content:center; font:400 26px var(--f-display); color:var(--stamp)}
@@ -149,7 +152,20 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .viewfinder .flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none}
 .viewfinder .flash.go{animation:flash .5s ease-out}
 @keyframes flash{from{opacity:1} to{opacity:0}}
+/* "Zoek deze plek": the drawing, the viewfinder and the snap button share one phone screen, so nobody scrolls while aiming.
+   The question comes on its own screen first; the room left after the buttons (about 300px) goes 45/55 to the drawing and the viewfinder. */
 .full.sketch{max-height:42vh; background:#fff}
+.paper.hunt{padding-block:16px}
+.paper.hunt .full.sketch{max-height:min(42vh, max(110px, calc((100vh - 300px) * .45)))}
+.viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62vh, max(150px, calc((100vh - 300px) * .55)))))}
+@supports (height:100svh){
+  .paper.hunt .full.sketch{max-height:min(42svh, max(110px, calc((100svh - 300px) * .45)))}
+  .viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62svh, max(150px, calc((100svh - 300px) * .55)))))}
+}
+.viewfinder .meter{position:absolute; left:0; right:0; bottom:0; padding:22px 10px 6px; pointer-events:none;
+  background:linear-gradient(transparent, rgba(0,0,0,.6))}
+.viewfinder .meter .meter-track{height:16px}
+.viewfinder .meter .meter-txt{color:#fff; margin-top:4px; font-size:clamp(15px, 4.4vw, 20px); text-shadow:0 1px 3px rgba(0,0,0,.7)}
 .viewfinder .ghost{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.55; mix-blend-mode:multiply; pointer-events:none}
 .meter-track{position:relative; height:24px; border-radius:12px; overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.35);
   background:linear-gradient(90deg, #4aa3c7, #9fd3ee 30%, #f4d43c 60%, #e8843a 80%, #c42f28)}
@@ -229,7 +245,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 16;
+const VERSION = 18;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -496,7 +512,7 @@ function tick(high){
 const clips = new Map(), buffers = new Map(); // key -> mp3 blob / decoded AudioBuffer
 const JIG_DONE = "Gelukt! Nu weten jullie waar het briefje ligt. Snel, ga kijken!";
 const clueText = (s, k) => s.clue || { photo:"Waar is dit? Zoek de plek van de foto. Daar ligt een briefje met een geheime code!",
-  jigsaw:"De foto is in stukjes gevallen! Tik op twee stukjes om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
+  jigsaw:"De foto is in stukjes gevallen! Sleep een stukje naar een ander stukje (of tik op twee stukjes) om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
   match:"Waar is deze plek? Zoek hem en maak er een foto van, vanaf dezelfde kant als de tekening. De meter zegt of jullie warm of koud zijn!" }[k] || "";
 const MSG = { wrongCode:"Die code klopt niet. Kijk nog eens goed op het briefje!", wrongSuspect:"Nee hoor! Kijk nog eens goed naar de bewijsstukken." };
 const speakable = t => String(t||"").replace(/[\p{Extended_Pictographic}️‍]/gu, "").replace(/\s*\n\s*/g, " ").replace(/\s{2,}/g, " ").trim();
@@ -1029,16 +1045,21 @@ function renderClue(){
     text = `${text}\n\n(De foto van deze plek staat niet op dit apparaat.)`;
     after = `<button class="btn" data-act="skipStep">Sla deze opdracht over</button>`;
   }
+  else if (k==="match" && !sub.go){ // first the question on its own, then the drawing and the camera together
+    after = `<button class="btn" data-act="huntGo">🔍 Zoeken maar!</button>`;
+  }
   else if (k==="match"){
+    text = ""; slot = "";
     const pic = imgs.get(s.showPhoto ? s.photo : (imgs.has(s.sketch) ? s.sketch : s.photo));
     extra = `<img class="full ${s.showPhoto ? "" : "sketch"}" src="${pic}" alt="${s.showPhoto ? "Foto" : "Tekening"} van de plek die jullie moeten vinden">`;
     const tail = `<p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>${hint}
+      <button class="btn ghost" data-act="huntBack">📜 Lees de vraag nog eens</button>
       <button class="btn ghost" data-act="approve">Ouders: plek goedkeuren</button>`;
     if (ui.busy) after = `<div class="busy"><span class="glass">🔍</span><p>${esc(ui.busy)}</p></div>`;
-    else if (camOk()) after = `<div class="viewfinder"><video id="vf" class="${cam.facing==="user"?"mirror":""}" playsinline muted autoplay></video>
-        ${ui.ghost ? `<img class="ghost" src="${pic}" alt="">` : ""}<div class="flash" id="flash"></div></div>
-      <div><div class="meter-track" role="img" aria-label="Warm of koud"><span id="meterCover" style="width:${100-hunt.warm*100}%"></span></div>
-        <p class="meter-txt" id="meterTxt" aria-live="polite">${BANDS[hunt.band].t}</p></div>
+    else if (camOk()) after = `<div class="viewfinder hunt"><video id="vf" class="${cam.facing==="user"?"mirror":""}" playsinline muted autoplay></video>
+        ${ui.ghost ? `<img class="ghost" src="${pic}" alt="">` : ""}<div class="flash" id="flash"></div>
+        <div class="meter"><div class="meter-track" role="img" aria-label="Warm of koud"><span id="meterCover" style="width:${100-hunt.warm*100}%"></span></div>
+          <p class="meter-txt" id="meterTxt" aria-live="polite">${BANDS[hunt.band].t}</p></div></div>
       <button class="btn" data-act="huntSnap">📸 Is het hier?</button>
       <div class="row"><button class="btn alt small" data-act="flip">🔄 Andere camera</button>
         ${(sub.tries||0) >= 2 ? `<button class="btn alt small" data-act="ghost">👻 ${ui.ghost ? "Spiekplaatje weg" : "Spiekplaatje"}</button>` : ""}</div>` + tail;
@@ -1073,11 +1094,11 @@ function renderClue(){
 
   return folder(`${(prog.team||"DETECTIVES").toUpperCase()} · STAP ${i+1}/${n}`, `
     <div class="progress" aria-label="Stap ${i+1} van ${n}">${dots}</div>
-    <div class="paper"><span class="tape"></span>
+    <div class="paper ${k==="match" && sub.go ? "hunt" : ""}"><span class="tape"></span>
       <p class="type muted" style="margin-bottom:8px">${label} ${i+1}</p>
       ${text ? `<p class="riddle">${esc(text)}</p>` : ""}
       ${extra}
-      ${sayBtn(slot)}
+      ${slot ? sayBtn(slot) : ""}
     </div>
     ${after}
     ${evidenceList(i)}
@@ -1422,6 +1443,41 @@ async function enterGame(act, team){
   keepAwake(); saveProg(); render(); if (act==="begin") scrollTo(0,0);
 }
 
+/* ---------- photo puzzle: tap two pieces to swap them, or drag one onto another ---------- */
+function swapTiles(a, b){
+  const sub = prog.sub;
+  [sub.order[a], sub.order[b]] = [sub.order[b], sub.order[a]]; sub.sel = null;
+  if (sub.order.every((v,j)=>v===j)){ sub.solved = true; beep(true); confetti(); }
+  saveProg(); render();
+}
+let drag = null, dragged = false; // drag: { el, p, x, y, on, over }; dragged: the next click ends a drag, it is not a tap
+app.addEventListener("pointerdown", e=>{
+  dragged = false;
+  const el = e.target.closest(".jig [data-act=tile]");
+  if (!el || !e.isPrimary || e.button>0) return;
+  drag = { el, p:+el.dataset.p, x:e.clientX, y:e.clientY, on:false, over:null };
+  el.setPointerCapture(e.pointerId);
+});
+app.addEventListener("pointermove", e=>{
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.on && Math.hypot(dx, dy) < 8) return; // a small wobble is still a tap
+  drag.on = true; drag.el.classList.add("drag");
+  drag.el.style.transform = `translate(${dx}px,${dy}px) scale(.85)`;
+  const under = document.elementsFromPoint(e.clientX, e.clientY).find(t=>t!==drag.el && t.matches(".jig [data-act=tile]")) || null;
+  if (under !== drag.over){ drag.over?.classList.remove("over"); under?.classList.add("over"); drag.over = under; }
+});
+const endDrag = e=>{
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.on) return; // a tap: the click handler swaps
+  dragged = true;
+  if (e.type==="pointerup" && d.over) swapTiles(d.p, +d.over.dataset.p);
+  else { d.el.classList.remove("drag"); d.el.style.transform = ""; d.over?.classList.remove("over"); }
+};
+app.addEventListener("pointerup", endDrag);
+app.addEventListener("pointercancel", endDrag);
+
 /* ---------- events ---------- */
 app.addEventListener("click", async e=>{
   const b = e.target.closest("[data-act]"), act = b?.dataset.act;
@@ -1439,15 +1495,17 @@ app.addEventListener("click", async e=>{
       if (prog.phase!=="start" && !b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker weten? Tik nog een keer"; return; }
       prog = newProg((document.getElementById("team")?.value||prog.team||"").trim(), "start");
       ui.hintShown=false; ui.zoom=0; saveProg(); render(); scrollTo(0,0); break;
+    case "huntGo": prog.sub.go = true; saveProg(); render(); scrollTo(0,0); break;
+    case "huntBack": prog.sub.go = false; saveProg(); render(); scrollTo(0,0); break;
     case "hint": ui.hintShown=true; render(); say(`hint${prog.index}`); break;
     case "say": getAudio(); say(b.dataset.slot); break;
     case "zoomOut": ui.zoom=Math.min(ui.zoom+1, ZOOMS.length-1); render(); break;
     case "tile": {
+      if (dragged) break;
       const p=+b.dataset.p;
-      if(sub.sel==null || sub.sel===p){ sub.sel = sub.sel===p ? null : p; }
-      else { [sub.order[sub.sel], sub.order[p]] = [sub.order[p], sub.order[sub.sel]]; sub.sel=null;
-        if(sub.order.every((v,j)=>v===j)){ sub.solved=true; beep(true); confetti(); } }
-      saveProg(); render(); break; }
+      if(sub.sel==null || sub.sel===p){ sub.sel = sub.sel===p ? null : p; saveProg(); render(); }
+      else swapTiles(sub.sel, p);
+      break; }
     case "letter": {
       const s=cfg.steps[prog.index], word=norm(s.code);
       sub.picked=[...(sub.picked||[]), +b.dataset.p];
