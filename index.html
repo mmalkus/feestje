@@ -129,6 +129,9 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .jig{display:grid; grid-template-columns:repeat(3,1fr); gap:3px; aspect-ratio:1; background:var(--ink); padding:3px; border-radius:6px; margin-top:12px}
 .jig button{border:0; padding:0; background-size:300% 300%; cursor:pointer; border-radius:2px}
 .jig button.sel{outline:5px solid var(--tape); outline-offset:-5px}
+.jig button{touch-action:none; position:relative}
+.jig button.drag{z-index:2; opacity:.85; box-shadow:0 8px 18px rgba(0,0,0,.45); cursor:grabbing}
+.jig button.over{outline:5px dashed var(--tape); outline-offset:-5px}
 .full{max-width:100%; max-height:62vh; border-radius:6px; display:block; margin:12px auto 0}
 .slots{display:flex; gap:5px; justify-content:center; margin-top:14px}
 .slot{flex:0 1 40px; min-width:0; height:50px; border-bottom:4px solid var(--ink); display:flex; align-items:flex-end; justify-content:center; font:400 26px var(--f-display); color:var(--stamp)}
@@ -242,7 +245,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 17;
+const VERSION = 18;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -509,7 +512,7 @@ function tick(high){
 const clips = new Map(), buffers = new Map(); // key -> mp3 blob / decoded AudioBuffer
 const JIG_DONE = "Gelukt! Nu weten jullie waar het briefje ligt. Snel, ga kijken!";
 const clueText = (s, k) => s.clue || { photo:"Waar is dit? Zoek de plek van de foto. Daar ligt een briefje met een geheime code!",
-  jigsaw:"De foto is in stukjes gevallen! Tik op twee stukjes om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
+  jigsaw:"De foto is in stukjes gevallen! Sleep een stukje naar een ander stukje (of tik op twee stukjes) om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
   match:"Waar is deze plek? Zoek hem en maak er een foto van, vanaf dezelfde kant als de tekening. De meter zegt of jullie warm of koud zijn!" }[k] || "";
 const MSG = { wrongCode:"Die code klopt niet. Kijk nog eens goed op het briefje!", wrongSuspect:"Nee hoor! Kijk nog eens goed naar de bewijsstukken." };
 const speakable = t => String(t||"").replace(/[\p{Extended_Pictographic}️‍]/gu, "").replace(/\s*\n\s*/g, " ").replace(/\s{2,}/g, " ").trim();
@@ -1440,6 +1443,41 @@ async function enterGame(act, team){
   keepAwake(); saveProg(); render(); if (act==="begin") scrollTo(0,0);
 }
 
+/* ---------- photo puzzle: tap two pieces to swap them, or drag one onto another ---------- */
+function swapTiles(a, b){
+  const sub = prog.sub;
+  [sub.order[a], sub.order[b]] = [sub.order[b], sub.order[a]]; sub.sel = null;
+  if (sub.order.every((v,j)=>v===j)){ sub.solved = true; beep(true); confetti(); }
+  saveProg(); render();
+}
+let drag = null, dragged = false; // drag: { el, p, x, y, on, over }; dragged: the next click ends a drag, it is not a tap
+app.addEventListener("pointerdown", e=>{
+  dragged = false;
+  const el = e.target.closest(".jig [data-act=tile]");
+  if (!el || !e.isPrimary || e.button>0) return;
+  drag = { el, p:+el.dataset.p, x:e.clientX, y:e.clientY, on:false, over:null };
+  el.setPointerCapture(e.pointerId);
+});
+app.addEventListener("pointermove", e=>{
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.on && Math.hypot(dx, dy) < 8) return; // a small wobble is still a tap
+  drag.on = true; drag.el.classList.add("drag");
+  drag.el.style.transform = `translate(${dx}px,${dy}px) scale(.85)`;
+  const under = document.elementsFromPoint(e.clientX, e.clientY).find(t=>t!==drag.el && t.matches(".jig [data-act=tile]")) || null;
+  if (under !== drag.over){ drag.over?.classList.remove("over"); under?.classList.add("over"); drag.over = under; }
+});
+const endDrag = e=>{
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.on) return; // a tap: the click handler swaps
+  dragged = true;
+  if (e.type==="pointerup" && d.over) swapTiles(d.p, +d.over.dataset.p);
+  else { d.el.classList.remove("drag"); d.el.style.transform = ""; d.over?.classList.remove("over"); }
+};
+app.addEventListener("pointerup", endDrag);
+app.addEventListener("pointercancel", endDrag);
+
 /* ---------- events ---------- */
 app.addEventListener("click", async e=>{
   const b = e.target.closest("[data-act]"), act = b?.dataset.act;
@@ -1463,11 +1501,11 @@ app.addEventListener("click", async e=>{
     case "say": getAudio(); say(b.dataset.slot); break;
     case "zoomOut": ui.zoom=Math.min(ui.zoom+1, ZOOMS.length-1); render(); break;
     case "tile": {
+      if (dragged) break;
       const p=+b.dataset.p;
-      if(sub.sel==null || sub.sel===p){ sub.sel = sub.sel===p ? null : p; }
-      else { [sub.order[sub.sel], sub.order[p]] = [sub.order[p], sub.order[sub.sel]]; sub.sel=null;
-        if(sub.order.every((v,j)=>v===j)){ sub.solved=true; beep(true); confetti(); } }
-      saveProg(); render(); break; }
+      if(sub.sel==null || sub.sel===p){ sub.sel = sub.sel===p ? null : p; saveProg(); render(); }
+      else swapTiles(sub.sel, p);
+      break; }
     case "letter": {
       const s=cfg.steps[prog.index], word=norm(s.code);
       sub.picked=[...(sub.picked||[]), +b.dataset.p];
