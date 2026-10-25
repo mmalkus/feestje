@@ -111,6 +111,22 @@ label.lbl{font-size:14px; font-weight:600; color:var(--ink-soft); display:block;
   font:800 19px var(--f-body); cursor:pointer; padding:10px}
 .suspect.wrong{border-color:var(--stamp); opacity:.5; text-decoration:line-through}
 .step-edit{border:2px solid var(--folder-edge); border-radius:10px; padding:14px; background:rgba(255,255,255,.35)}
+.tabs{display:flex; gap:6px; padding:4px; border-radius:12px; background:rgba(43,36,32,.1)}
+.tabs button{flex:1; min-height:44px; border:0; border-radius:9px; background:transparent; color:var(--ink-soft); font:800 16px var(--f-body); cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--paper); color:var(--ink); box-shadow:0 2px 0 var(--folder-edge)}
+.steps{display:flex; flex-direction:column; gap:10px}
+.step-edit.closed{padding-block:8px}
+.step-head{display:flex; align-items:center; gap:6px}
+.step-grip{flex:none; width:40px; min-height:44px; border:0; border-radius:8px; background:transparent; color:var(--ink-soft); font-size:22px; cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none}
+.step-toggle{flex:1; min-width:0; min-height:44px; border:0; background:transparent; color:var(--ink); text-align:left; font:16px var(--f-body); cursor:pointer; padding:4px 2px; display:flex; flex-direction:column}
+.step-toggle span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px}
+.step-toggle .bad{color:var(--stamp); font-weight:600}
+.step-edit.dragging{position:relative; z-index:5; background:var(--paper); box-shadow:0 14px 28px rgba(0,0,0,.3); cursor:grabbing}
+.step-edit.dragging .step-grip{cursor:grabbing}
+.savebar{position:sticky; bottom:0; z-index:4; margin:0 -8px; padding:10px 8px calc(10px + env(safe-area-inset-bottom, 0px)); background:var(--folder); border-top:2px solid var(--folder-edge)}
+.savebar .msg{min-height:0}
+details.help summary{cursor:pointer; color:var(--ink-soft); font-weight:600; font-size:16px}
+details.help p{margin-top:6px}
 .notes-list{font-family:var(--f-type); font-size:18px; display:flex; flex-direction:column; gap:8px}
 .notes-list div{background:var(--paper); padding:10px 12px; border-radius:4px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap}
 .notes-list b{letter-spacing:.15em; color:var(--stamp)}
@@ -245,7 +261,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 18;
+const VERSION = 19;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -259,6 +275,7 @@ if (ai.visionModel == null) ai.visionModel = PROVIDERS[ai.provider]?.vision || "
 const aiKey = () => (ai.keys[ai.provider] || "").trim();
 let tts = Object.assign({}, TTS_DEFAULT, load(KEY_TTS, {}));
 const ttsKey = () => (tts.keys[tts.provider] || "").trim();
+let openSteps = new WeakSet(); // steps unfolded in the parents' menu (by object, so it follows a step when the order changes)
 let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0, matchInfo:{} };
 
 /* ---------- parents' lock: a sum or a PIN; asked every time the menu opens ---------- */
@@ -1176,14 +1193,18 @@ function stepEditor(s, i){
     scramble:"Uitleg bij de puzzel", camera:"Opdracht: wat moeten ze fotograferen?", match:"Tekst bij de tekening (mag leeg)" }[t];
   const photoLbl = t==="photo" ? "Foto van de verstopplek (de kinderen zien eerst een ingezoomd stukje uit het midden)"
     : "Foto van de verstopplek (wordt in 9 stukjes gehusseld)";
+  const open = openSteps.has(s), problem = stepProblem(s), summary = s.place || s.code || String(s.clue||"").split("\n")[0];
   return `
-    <div class="step-edit stack" style="gap:10px" data-i="${i}">
-      <div class="row" style="align-items:center"><b style="flex:0 0 auto">Stap ${i+1}</b>
-        <span style="display:flex;gap:6px;flex:0 0 auto;margin-left:auto">
-          <button class="btn alt small" data-act="up" data-i="${i}" ${i===0?"disabled":""} aria-label="Omhoog">↑</button>
-          <button class="btn alt small" data-act="down" data-i="${i}" ${i===cfg.steps.length-1?"disabled":""} aria-label="Omlaag">↓</button>
-          <button class="btn alt small" data-act="del" data-i="${i}" aria-label="Verwijder stap ${i+1}">✕</button>
-        </span></div>
+    <div class="step-edit stack${open?"":" closed"}" style="gap:10px" data-i="${i}">
+      <div class="step-head">
+        <button class="step-grip" data-drag="${i}" aria-label="Verplaats stap ${i+1}: sleep, of gebruik de pijltjestoetsen">⠿</button>
+        <button class="step-toggle" data-act="toggleStep" aria-expanded="${open}" aria-controls="step-body-${i}">
+          <b>${open?"▾":"▸"} Stap ${i+1} · ${TYPES[t]}</b>
+          ${problem ? `<span class="bad">⚠ ${esc(problem)}</span>` : summary ? `<span class="muted">${esc(summary)}</span>` : ""}
+        </button>
+        <button class="btn alt small" style="flex:none" data-act="del" data-i="${i}" aria-label="Verwijder stap ${i+1}">✕</button>
+      </div>
+      <div class="stack" style="gap:10px" id="step-body-${i}" ${open?"":"hidden"}>
       <div><label class="lbl" for="type-${i}">Soort opdracht</label>
         <select id="type-${i}" data-f="type">${Object.entries(TYPES).map(([v,l])=>`<option value="${v}" ${v===t?"selected":""}>${l}</option>`).join("")}</select></div>
       ${t==="photo"||t==="jigsaw" ? `<div><span class="lbl">${photoLbl}</span>
@@ -1212,7 +1233,7 @@ function stepEditor(s, i){
         <div><label class="lbl" for="hint-${i}">Tip</label><input type="text" id="hint-${i}" data-f="hint" value="${esc(s.hint)}"></div>
       </div>`}
       <div><label class="lbl" for="ev-${i}">Bewijsstuk dat ze hier vinden${t==="camera"?" (mag leeg)":""}</label><textarea id="ev-${i}" data-f="evidence" style="min-height:64px">${esc(s.evidence)}</textarea></div>
-    </div>`;
+    </div></div>`;
 }
 
 function ttsEditor(){
@@ -1256,74 +1277,89 @@ const ttsMsg = t => { const m=document.getElementById("ttsMsg"); if(m) m.textCon
 
 function renderSetup(){
   const notes = cfg.steps.map((s,i)=>NOTE_TYPES.includes(s.type||"code") ? `<div><span>${i+1}. ${esc(s.place)}</span><b>${esc(norm(s.code))}</b></div>` : "").join("");
+  const tab = ui.setupTab || "steps", h3 = t => `<h2 style="font-size:20px;margin-top:8px">${t}</h2>`;
+  const tabBtn = (k, label) => `<button role="tab" id="tab-${k}" aria-controls="panel-${k}" aria-selected="${tab===k}" data-act="tab" data-tab="${k}">${label}</button>`;
   return folder("INSTELLINGEN · OUDERS", `
-    ${canFs ? `<button class="btn alt small" data-act="fullscreen">${fsLabel()}</button>`
-      : (window.navigator.standalone || matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches) ? ""
-      : `<p class="muted" style="font-size:15px">Volledig scherm: open het spel in Safari, tik op Deel → <b>Zet op beginscherm</b> en start het vanaf daar.</p>`}
-    <h2>Speurtocht instellen</h2>
-    <p class="muted" style="font-size:16px">Alles wordt bewaard op dít apparaat. Stel het dus in op de telefoon of tablet waarmee de kinderen spelen.</p>
-    <div><label class="lbl" for="s-title">Titel</label><input type="text" id="s-title" value="${esc(cfg.title)}"></div>
-    <div><label class="lbl" for="s-story">Verhaal op het startscherm</label><textarea id="s-story">${esc(cfg.story)}</textarea></div>
-    ${lockEditor()}
-    <h2 style="font-size:20px;margin-top:8px">Opdrachten</h2>
-    <p class="muted" style="font-size:16px"><b>Raadsel + briefje</b>: zoek de plek, typ de code. <b>Waar is dit?</b>: een ingezoomde foto van de plek. <b>Fotopuzzel</b>: puzzel de foto van de plek in elkaar.
-      <b>Letterpuzzel</b>: zet de letters van een woord op volgorde. <b>Foto-opdracht</b>: de kinderen maken zelf een foto; die komt in het fotoalbum aan het eind.
-      <b>Zoek deze plek</b>: de kinderen zien een tekening van een plek, zoeken hem en fotograferen hem; een meter zegt of ze warm of koud zijn.</p>
-    ${cfg.steps.map(stepEditor).join("")}
-    <button class="btn alt" data-act="add">+ Opdracht toevoegen</button>
-    <h2 style="font-size:20px;margin-top:8px">Verdachten</h2>
-    <div><label class="lbl" for="s-suspects">Namen, gescheiden door komma's</label><input type="text" id="s-suspects" value="${esc(cfg.suspects.join(", "))}"></div>
-    <div><label class="lbl" for="s-culprit">Wie is de dader?</label>
-      <select id="s-culprit">${cfg.suspects.map((n,k)=>`<option value="${k}" ${k===cfg.culpritIndex?"selected":""}>${esc(n)}</option>`).join("")}</select></div>
-    <div><label class="lbl" for="s-final">Waar ligt de taart / traktatie echt?</label><input type="text" id="s-final" value="${esc(cfg.finalHide)}"></div>
-    <h2 style="font-size:20px;margin-top:8px">Detective-foto's met AI (optioneel)</h2>
-    <p class="muted" style="font-size:16px">Zonder sleutel maakt “Maak er detectives van” een detective-dossierfoto op het apparaat zelf.
-      Met een API-sleutel wordt de foto een getekend detective-plaatje (kost een paar cent per foto, duurt ±1 minuut, en de foto wordt naar die dienst gestuurd).
-      De sleutel blijft alleen op dit apparaat. Gebruik een aparte sleutel met een bestedingslimiet.</p>
-    <div><label class="lbl" for="ai-provider">Dienst</label>
-      <select id="ai-provider">${Object.entries(PROVIDERS).map(([k,p])=>`<option value="${k}" ${k===ai.provider?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
-    <div><label class="lbl" for="ai-base">Adres (endpoint)</label><input type="text" id="ai-base" inputmode="url" spellcheck="false" placeholder="https://…/v1" value="${esc(ai.base)}"></div>
-    <div><label class="lbl" for="ai-style">Soort API</label>
-      <select id="ai-style">${Object.entries(STYLES).map(([k,l])=>`<option value="${k}" ${k===ai.style?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
-    ${ai.style==="mistral" ? `<p class="muted" style="font-size:15px">Let op: Mistral kan een foto niet bewerken. Het model bekijkt de foto en tekent een nieuw plaatje, dus de gezichten lijken minder.</p>` : ""}
-    <div><label class="lbl" for="ai-key">API-sleutel</label><input type="password" id="ai-key" autocomplete="off" placeholder="sk-…" value="${esc(aiKey())}"></div>
-    <div><label class="lbl" for="ai-model">Model</label>
-      ${ai.models.length ? `<select id="ai-model">${(ai.models.some(m=>m.id===ai.model) ? [] : [{id:ai.model}]).concat(ai.models)
-          .map(m=>`<option value="${esc(m.id)}" ${m.id===ai.model?"selected":""}>${m.img?"🖼 ":""}${esc(m.id)}</option>`).join("")}</select>`
-        : `<input type="text" id="ai-model" spellcheck="false" value="${esc(ai.model)}">`}</div>
-    <div class="row">
-      <button class="btn alt small" data-act="loadModels">Modellen ophalen</button>
-      <button class="btn alt small" data-act="testAi">Test de AI-tekenaar</button>
-      ${ai.models.length ? `<button class="btn alt small" data-act="typeModel">Zelf een model typen</button>` : ""}
+    <div class="tabs" role="tablist" aria-label="Ouders">${tabBtn("steps", "🧩 Opdrachten")}${tabBtn("settings", "⚙️ Instellingen")}</div>
+    <div class="stack" id="panel-steps" role="tabpanel" aria-labelledby="tab-steps" ${tab==="steps"?"":"hidden"}>
+      <h2>Speurtocht</h2>
+      <p class="muted" style="font-size:16px">Alles wordt bewaard op dít apparaat. Stel het dus in op de telefoon of tablet waarmee de kinderen spelen.</p>
+      <div><label class="lbl" for="s-title">Titel</label><input type="text" id="s-title" value="${esc(cfg.title)}"></div>
+      <div><label class="lbl" for="s-story">Verhaal op het startscherm</label><textarea id="s-story">${esc(cfg.story)}</textarea></div>
+      ${h3("Opdrachten")}
+      <details class="help"><summary>Welke soorten opdrachten zijn er?</summary>
+        <p class="muted" style="font-size:16px"><b>Raadsel + briefje</b>: zoek de plek, typ de code. <b>Waar is dit?</b>: een ingezoomde foto van de plek. <b>Fotopuzzel</b>: puzzel de foto van de plek in elkaar.
+        <b>Letterpuzzel</b>: zet de letters van een woord op volgorde. <b>Foto-opdracht</b>: de kinderen maken zelf een foto; die komt in het fotoalbum aan het eind.
+        <b>Zoek deze plek</b>: de kinderen zien een tekening van een plek, zoeken hem en fotograferen hem; een meter zegt of ze warm of koud zijn.</p></details>
+      <p class="muted" style="font-size:15px">Tik op een opdracht om hem open of dicht te klappen. Sleep aan ⠿ om de volgorde te veranderen.</p>
+      <div class="row">
+        <button class="btn alt small" data-act="openAll">Alles open</button>
+        <button class="btn alt small" data-act="closeAll">Alles dicht</button>
+      </div>
+      <div class="steps" id="steps">${cfg.steps.map(stepEditor).join("")}</div>
+      <button class="btn alt" data-act="add">+ Opdracht toevoegen</button>
+      ${h3("Verdachten")}
+      <div><label class="lbl" for="s-suspects">Namen, gescheiden door komma's</label><input type="text" id="s-suspects" value="${esc(cfg.suspects.join(", "))}"></div>
+      <div><label class="lbl" for="s-culprit">Wie is de dader?</label>
+        <select id="s-culprit">${cfg.suspects.map((n,k)=>`<option value="${k}" ${k===cfg.culpritIndex?"selected":""}>${esc(n)}</option>`).join("")}</select></div>
+      <div><label class="lbl" for="s-final">Waar ligt de taart / traktatie echt?</label><input type="text" id="s-final" value="${esc(cfg.finalHide)}"></div>
+      ${h3("Briefjes om te schrijven")}
+      <p class="muted" style="font-size:16px">Schrijf elke code op een briefje en leg het op de juiste plek. Hoofdletters of spaties maken niet uit.</p>
+      <div class="notes-list">${notes}</div>
     </div>
-    <p class="muted" style="font-size:14px">🖼 = maakt plaatjes${ai.style==="mistral" ? " (voor Mistral kies je juist een gewoon chatmodel, bijv. mistral-medium-latest)" : ""}.</p>
-    <p class="msg" id="aiMsg" aria-live="polite">${esc(aiStatus())}</p>
-    <div id="aiTest" class="stack" style="gap:8px"></div>
-    <div><label class="lbl" for="ai-prompt">Opdracht aan de AI</label><textarea id="ai-prompt" style="min-height:120px">${esc(ai.prompt)}</textarea></div>
-    <h2 style="font-size:20px;margin-top:8px">Zoek deze plek: AI kijkt mee (optioneel)</h2>
-    <p class="muted" style="font-size:16px">De tablet keurt de foto eerst zelf, zonder internet. Keurt hij hem af, dan kan dezelfde dienst als hierboven nog meekijken
-      met een model dat foto's bekijkt. Beide foto's gaan dan naar die dienst (minder dan een cent per keer).</p>
-    <label class="check"><input type="checkbox" id="ai-verify" ${ai.verify?"checked":""}> AI laten meekijken als de tablet de foto afkeurt</label>
-    <div><label class="lbl" for="ai-vision">Model dat foto's bekijkt</label>
-      <input type="text" id="ai-vision" list="ai-vision-list" spellcheck="false" placeholder="bijv. gpt-4.1-mini" value="${esc(ai.visionModel)}">
-      <datalist id="ai-vision-list">${ai.models.filter(m=>!m.img).map(m=>`<option value="${esc(m.id)}">`).join("")}</datalist></div>
-    <p class="muted" style="font-size:14px">${aiVerifyReady() ? "✓ De AI kijkt mee." : ai.verify && !aiKey() ? "Nog geen sleutel: alleen de tablet keurt de foto's." : ai.verify ? "Vul een model in." : "Uit: alleen de tablet keurt de foto's."}</p>
-    ${ttsEditor()}
-    <button class="btn" data-act="saveSetup">Opslaan</button>
-    <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
-    <p class="muted" style="font-size:16px">Schrijf elke code op een briefje en leg het op de juiste plek. Hoofdletters of spaties maken niet uit.</p>
-    <div class="notes-list">${notes}</div>
-    <h2 style="font-size:20px;margin-top:8px">Overzetten naar ander apparaat</h2>
-    <p class="muted" style="font-size:16px">Kopieer deze tekst, open het spel op het andere apparaat, ga naar Instellingen en plak hem hieronder. Foto's, ingesproken stemmen en de API-sleutels gaan niet mee: voeg die daar opnieuw toe.</p>
-    <textarea id="s-json" class="type" style="font-size:13px;min-height:110px">${esc(JSON.stringify(cfg))}</textarea>
-    <div class="row">
-      <button class="btn alt small" data-act="copyJson">Kopieer</button>
-      <button class="btn alt small" data-act="importJson">Gebruik geplakte tekst</button>
+    <div class="stack" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" ${tab==="settings"?"":"hidden"}>
+      ${canFs ? `<button class="btn alt small" data-act="fullscreen">${fsLabel()}</button>`
+        : (window.navigator.standalone || matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches) ? ""
+        : `<p class="muted" style="font-size:15px">Volledig scherm: open het spel in Safari, tik op Deel → <b>Zet op beginscherm</b> en start het vanaf daar.</p>`}
+      ${lockEditor()}
+      ${h3("Detective-foto's met AI (optioneel)")}
+      <p class="muted" style="font-size:16px">Zonder sleutel maakt “Maak er detectives van” een detective-dossierfoto op het apparaat zelf.
+        Met een API-sleutel wordt de foto een getekend detective-plaatje (kost een paar cent per foto, duurt ±1 minuut, en de foto wordt naar die dienst gestuurd).
+        De sleutel blijft alleen op dit apparaat. Gebruik een aparte sleutel met een bestedingslimiet.</p>
+      <div><label class="lbl" for="ai-provider">Dienst</label>
+        <select id="ai-provider">${Object.entries(PROVIDERS).map(([k,p])=>`<option value="${k}" ${k===ai.provider?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+      <div><label class="lbl" for="ai-base">Adres (endpoint)</label><input type="text" id="ai-base" inputmode="url" spellcheck="false" placeholder="https://…/v1" value="${esc(ai.base)}"></div>
+      <div><label class="lbl" for="ai-style">Soort API</label>
+        <select id="ai-style">${Object.entries(STYLES).map(([k,l])=>`<option value="${k}" ${k===ai.style?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
+      ${ai.style==="mistral" ? `<p class="muted" style="font-size:15px">Let op: Mistral kan een foto niet bewerken. Het model bekijkt de foto en tekent een nieuw plaatje, dus de gezichten lijken minder.</p>` : ""}
+      <div><label class="lbl" for="ai-key">API-sleutel</label><input type="password" id="ai-key" autocomplete="off" placeholder="sk-…" value="${esc(aiKey())}"></div>
+      <div><label class="lbl" for="ai-model">Model</label>
+        ${ai.models.length ? `<select id="ai-model">${(ai.models.some(m=>m.id===ai.model) ? [] : [{id:ai.model}]).concat(ai.models)
+            .map(m=>`<option value="${esc(m.id)}" ${m.id===ai.model?"selected":""}>${m.img?"🖼 ":""}${esc(m.id)}</option>`).join("")}</select>`
+          : `<input type="text" id="ai-model" spellcheck="false" value="${esc(ai.model)}">`}</div>
+      <div class="row">
+        <button class="btn alt small" data-act="loadModels">Modellen ophalen</button>
+        <button class="btn alt small" data-act="testAi">Test de AI-tekenaar</button>
+        ${ai.models.length ? `<button class="btn alt small" data-act="typeModel">Zelf een model typen</button>` : ""}
+      </div>
+      <p class="muted" style="font-size:14px">🖼 = maakt plaatjes${ai.style==="mistral" ? " (voor Mistral kies je juist een gewoon chatmodel, bijv. mistral-medium-latest)" : ""}.</p>
+      <p class="msg" id="aiMsg" aria-live="polite">${esc(aiStatus())}</p>
+      <div id="aiTest" class="stack" style="gap:8px"></div>
+      <div><label class="lbl" for="ai-prompt">Opdracht aan de AI</label><textarea id="ai-prompt" style="min-height:120px">${esc(ai.prompt)}</textarea></div>
+      ${h3("Zoek deze plek: AI kijkt mee (optioneel)")}
+      <p class="muted" style="font-size:16px">De tablet keurt de foto eerst zelf, zonder internet. Keurt hij hem af, dan kan dezelfde dienst als hierboven nog meekijken
+        met een model dat foto's bekijkt. Beide foto's gaan dan naar die dienst (minder dan een cent per keer).</p>
+      <label class="check"><input type="checkbox" id="ai-verify" ${ai.verify?"checked":""}> AI laten meekijken als de tablet de foto afkeurt</label>
+      <div><label class="lbl" for="ai-vision">Model dat foto's bekijkt</label>
+        <input type="text" id="ai-vision" list="ai-vision-list" spellcheck="false" placeholder="bijv. gpt-4.1-mini" value="${esc(ai.visionModel)}">
+        <datalist id="ai-vision-list">${ai.models.filter(m=>!m.img).map(m=>`<option value="${esc(m.id)}">`).join("")}</datalist></div>
+      <p class="muted" style="font-size:14px">${aiVerifyReady() ? "✓ De AI kijkt mee." : ai.verify && !aiKey() ? "Nog geen sleutel: alleen de tablet keurt de foto's." : ai.verify ? "Vul een model in." : "Uit: alleen de tablet keurt de foto's."}</p>
+      ${ttsEditor()}
+      ${h3("Overzetten naar ander apparaat")}
+      <p class="muted" style="font-size:16px">Kopieer deze tekst, open het spel op het andere apparaat, ga naar Instellingen en plak hem hieronder. Foto's, ingesproken stemmen en de API-sleutels gaan niet mee: voeg die daar opnieuw toe.</p>
+      <textarea id="s-json" class="type" style="font-size:13px;min-height:110px">${esc(JSON.stringify(cfg))}</textarea>
+      <div class="row">
+        <button class="btn alt small" data-act="copyJson">Kopieer</button>
+        <button class="btn alt small" data-act="importJson">Gebruik geplakte tekst</button>
+      </div>
+      <div class="row">
+        <button class="btn alt small" data-act="resetProg">Spel terug naar begin</button>
+        <button class="btn alt small" data-act="resetAll">Voorbeeld herstellen</button>
+      </div>
     </div>
-    <p class="msg" id="setupMsg" aria-live="polite">${esc(ui.msg)}</p>
-    <div class="row">
-      <button class="btn alt small" data-act="resetProg">Spel terug naar begin</button>
-      <button class="btn alt small" data-act="resetAll">Voorbeeld herstellen</button>
+    <div class="savebar stack" style="gap:6px">
+      <button class="btn" data-act="saveSetup">Opslaan</button>
+      <p class="msg" id="setupMsg" aria-live="polite">${esc(ui.msg)}</p>
     </div>
     <button class="btn ghost" data-act="back">Terug naar het spel</button>
     <p class="muted" style="font-size:14px;text-align:center">Versie ${VERSION}</p>
@@ -1606,13 +1642,26 @@ app.addEventListener("click", async e=>{
       lock={ mode:"pin", salt, hash: await hashPin(p1, salt) }; save(KEY_LOCK, lock); ui.lockDraft=null; ui.recovered=false;
       document.getElementById("pin1").value=document.getElementById("pin2").value="";
       msg("Pincode opgeslagen. Die wordt voortaan elke keer gevraagd."); break; }
-    case "add": collectSetup(); cfg.steps.push({type:"code",clue:"",place:"",code:"",hint:"",evidence:""}); render(); break;
-    case "del": collectSetup(); if(cfg.steps.length>1){ cfg.steps.splice(i,1); } render(); break;
-    case "up": case "down": { collectSetup(); const j = act==="up"?i-1:i+1; [cfg.steps[i],cfg.steps[j]]=[cfg.steps[j],cfg.steps[i]]; render(); break; }
+    case "tab": collectSetup(); ui.setupTab=b.dataset.tab; render(); scrollTo(0,0); break;
+    case "toggleStep": { // fold in place, so nothing typed gets lost
+      const el=b.closest(".step-edit"), st=cfg.steps[+el.dataset.i], open=!openSteps.has(st);
+      open ? openSteps.add(st) : openSteps.delete(st);
+      el.classList.toggle("closed", !open); document.getElementById(b.getAttribute("aria-controls")).hidden=!open;
+      b.setAttribute("aria-expanded", open); b.querySelector("b").textContent = b.querySelector("b").textContent.replace(/^[▸▾]/, open?"▾":"▸");
+      break; }
+    case "openAll": collectSetup(); cfg.steps.forEach(st=>openSteps.add(st)); render(); break;
+    case "closeAll": collectSetup(); openSteps=new WeakSet(); render(); break;
+    case "add": { collectSetup(); const st={type:"code",clue:"",place:"",code:"",hint:"",evidence:""}; cfg.steps.push(st); openSteps.add(st); render();
+      document.querySelector(`.step-edit[data-i="${cfg.steps.length-1}"]`)?.scrollIntoView({block:"start", behavior:"smooth"}); break; }
+    case "del":
+      if(cfg.steps.length<2) return setupMsg("Er moet minstens één opdracht overblijven.");
+      if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker?"; return; }
+      collectSetup(); cfg.steps.splice(i,1); ui.matchInfo={}; render(); break;
     case "saveSetup": {
       collectSetup(); save(KEY_AI, ai); save(KEY_TTS, tts);
       const bad = cfg.steps.findIndex(s=>stepProblem(s));
-      if(bad>=0){ setupMsg(`Stap ${bad+1} ${stepProblem(cfg.steps[bad])}.`); return; }
+      if(bad>=0){ ui.setupTab="steps"; openSteps.add(cfg.steps[bad]); render(); setupMsg(`Stap ${bad+1} ${stepProblem(cfg.steps[bad])}.`);
+        document.querySelector(`.step-edit[data-i="${bad}"]`)?.scrollIntoView({block:"center"}); return; }
       for (const st of cfg.steps) if (st.type==="match" && imgs.has(st.photo) && !imgs.has(st.sketch)){ // e.g. a "Waar is dit?" photo reused
         setupMsg("Tekening wordt gemaakt…"); try{ st.sketch = await sketchOf(st.photo); }catch(err){} }
       save(KEY_CFG,cfg); gcImages();
@@ -1724,6 +1773,51 @@ app.addEventListener("submit", e=>{
       ui.msg = pin ? "Die pincode klopt niet." : "Dat is niet goed. Hier is een nieuwe som."; ui.gateQ=null; render();
     }
   })();
+});
+
+/* ---------- dragging the steps into a new order (pointer events, so it works with a finger as well as a mouse) ---------- */
+let stepDrag = null; // { el, grab, y }
+function moveSteps(order){ // order = old indexes in their new order
+  collectSetup(); // reads each step by its data-i, so it also works after the boxes were moved around
+  if (!order.every((v,k)=>v===k)){ cfg.steps = order.map(k=>cfg.steps[k]); ui.matchInfo = {}; }
+  render();
+}
+function dragFrame(){
+  if (!stepDrag) return;
+  const { el, y, grab } = stepDrag, edge = 70;
+  if (y < edge) scrollBy(0, -(edge-y)/4); else if (y > innerHeight-edge) scrollBy(0, (y-innerHeight+edge)/4);
+  // put the step before the first other step whose middle is below the finger
+  el.style.transform = "";
+  const others = [...el.parentNode.children].filter(o=>o!==el);
+  const before = others.find(o=>{ const r=o.getBoundingClientRect(); return y < r.top + r.height/2; }) || null;
+  if (el.nextElementSibling !== before) el.parentNode.insertBefore(el, before);
+  el.style.transform = `translateY(${y - grab - el.getBoundingClientRect().top}px)`;
+  requestAnimationFrame(dragFrame);
+}
+app.addEventListener("pointerdown", e=>{
+  const h = e.target.closest("[data-drag]");
+  if (!h || stepDrag || e.button>0) return;
+  e.preventDefault(); h.setPointerCapture(e.pointerId);
+  const el = h.closest(".step-edit");
+  stepDrag = { el, grab: e.clientY - el.getBoundingClientRect().top, y: e.clientY };
+  el.classList.add("dragging"); requestAnimationFrame(dragFrame);
+});
+app.addEventListener("pointermove", e=>{ if (stepDrag) stepDrag.y = e.clientY; });
+const dragEnd = ()=>{
+  if (!stepDrag) return;
+  const list = stepDrag.el.parentNode; stepDrag = null;
+  moveSteps([...list.children].map(o=>+o.dataset.i));
+};
+app.addEventListener("pointerup", dragEnd);
+app.addEventListener("pointercancel", dragEnd);
+app.addEventListener("keydown", e=>{ // the handle also moves a step with the arrow keys
+  const h = e.target.closest?.("[data-drag]");
+  if (!h || !/^Arrow(Up|Down)$/.test(e.key)) return;
+  e.preventDefault();
+  const i = +h.dataset.drag, j = e.key==="ArrowUp" ? i-1 : i+1;
+  if (j<0 || j>=cfg.steps.length) return;
+  const order = cfg.steps.map((_,k)=>k); [order[i], order[j]] = [order[j], order[i]];
+  moveSteps(order); document.querySelector(`[data-drag="${j}"]`)?.focus();
 });
 
 app.addEventListener("input", e=>{
