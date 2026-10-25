@@ -73,3 +73,12 @@ Clips are reused as long as the text and the voice settings stay the same. A "ðŸ
 Keys are stored per service only in that browser's localStorage, like the image key.
 
 Photos are stored in IndexedDB on the device and are not part of the copy/paste export.
+
+## Tests
+Run on every pull request to `main` (GitHub Actions, `.github/workflows/tests.yml`). Locally:
+```
+pip install -r tests/requirements.txt && python -m playwright install chromium
+pytest tests
+```
+`test_static.py` checks that `VERSION` in index.html matches the cache name in sw.js, that the manifest and precached files exist, and that the scripts parse.
+`test_smoke.py` opens the game in Chromium at phone size: start screen, starting the hunt, the parent gate (wrong and right answer) and offline reload via the service worker.
