@@ -14,6 +14,7 @@ The game goes fullscreen when the kids tap "Start het onderzoek" (and via the �
 
 ## Setup
 Tap "Ouders" (bottom right), answer the sum (two digits × two digits, e.g. 12 × 45), edit the steps/suspects, Save.
+The menu has two tabs: **Opdrachten** (story, steps, suspects; tap a step to fold it open or closed, drag ⠿ to reorder) and **Instellingen** (lock, AI, voice, transfer).
 The menu asks for the sum or PIN **every** time it is opened. Under "Toegang tot dit menu" you can switch to a 4–8 digit PIN
 (stored as a salted SHA-256 hash on the device). Forgot it? "Pincode vergeten?" lets you in with a two-digit × two-digit sum, then set a new PIN.
 After 5 wrong tries the gate waits 30 seconds.
@@ -33,7 +34,7 @@ Each step in the setup has a type:
   The browser asks for camera permission once; if it's refused or not available, the button opens the device's own camera instead.
   With "Maak er detectives van" on, they can turn it into a detective picture:
   - without an API key: a sepia "case file" print with a TOPDETECTIVES stamp, made on the device;
-  - with an API key (Ouders → Detective-foto's met AI): a picture-book illustration of the group as detectives.
+  - with an API key (Ouders → Instellingen → Detective-foto's met AI): a picture-book illustration of the group as detectives.
     Pick a service (OpenAI, OpenRouter, Mistral, or "Anders" with your own endpoint URL), tap "Modellen ophalen" to load
     the model list from `<endpoint>/models` (🖼 marks image models) and choose one. Supported API styles:
     - *Foto bewerken*: OpenAI-style `POST /images/edits` (OpenAI `gpt-image-1`, compatible servers);
@@ -51,7 +52,7 @@ Each step in the setup has a type:
   - "📸 Is het hier?" checks the photo **on the device, offline**: it finds corners in both photos, matches them and counts how many
     agree on one camera move (ORB-style features + RANSAC, no library). "Hoe precies" sets how many must agree:
     Makkelijk 12, Normaal 18, Streng 30. In tests, unrelated photos reached 5–11 and photos of the same spot 17–270.
-  - If the device rejects it and an API key is set, an **AI second opinion** is asked (Ouders → "Zoek deze plek: AI kijkt mee"):
+  - If the device rejects it and an API key is set, an **AI second opinion** is asked (Ouders → Instellingen → "Zoek deze plek: AI kijkt mee"):
     both photos go to `POST /chat/completions` of the chosen service with a vision model (default `gpt-4.1-mini`,
     `google/gemini-2.5-flash` on OpenRouter, `mistral-medium-latest` on Mistral). Its tip is shown when it says no.
   - After two misses a "👻 Spiekplaatje" button lays the drawing over the camera image.
@@ -61,7 +62,7 @@ Each step in the setup has a type:
   - Found spots end up in the photo album on the final screen.
 
 ## Voorlezen (text-to-speech)
-Ouders → "Voorlezen": a voice reads the story, riddles, tips, evidence and the ending aloud. Every line is spoken
+Ouders → Instellingen → "Voorlezen": a voice reads the story, riddles, tips, evidence and the ending aloud. Every line is spoken
 **before the game starts** and stored in IndexedDB, so no internet is needed while playing. "🎙 Alles nu inspreken"
 does it in the setup; anything still missing (e.g. the closing line with the team name, or lines changed since) is
 spoken when the kids tap Start, behind a progress screen. If that fails, they can retry or "Start zonder stem".
