@@ -160,6 +160,7 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .ailog{white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.4 ui-monospace, Menlo, monospace; margin:6px 0 0; color:var(--ink)}
 .check{display:flex; gap:10px; align-items:center; font-size:16px}
 .check input{width:24px; height:24px}
+.paper .say{display:block; margin:10px auto 0}
 @media (prefers-reduced-motion: reduce){ *{animation:none!important; transition:none!important} }
 </style>
 
@@ -210,14 +211,26 @@ const AI_DEFAULT = {
   prompt: "Turn this photo into a bright, friendly children's picture-book illustration in which everyone is a detective: deerstalker hats, magnifying glasses, little trench coats, a playful mystery atmosphere with a birthday cake hidden somewhere. Keep exactly the same people, their faces, hair, poses and the number of people. Cheerful, warm, kid-friendly, no text."
 };
 
+/* Voices for reading the texts aloud. ElevenLabs: own (cloned/designed) voices via its voice list;
+   "openai" and "custom" use the OpenAI-style POST /audio/speech (also self-hosted servers). */
+const TTS_PROVIDERS = {
+  elevenlabs: { name:"ElevenLabs", base:"https://api.elevenlabs.io/v1", model:"eleven_multilingual_v2", voice:"JBFqnCBsd6RMkjVDRZzb" },
+  openai:     { name:"OpenAI",     base:"https://api.openai.com/v1",   model:"gpt-4o-mini-tts",        voice:"fable" },
+  custom:     { name:"Anders (OpenAI-compatibel /audio/speech)", base:"", model:"", voice:"" }
+};
+const OPENAI_VOICES = ["alloy","ash","ballad","cedar","coral","echo","fable","marin","nova","onyx","sage","shimmer","verse"];
+const TTS_DEFAULT = { on:false, provider:"elevenlabs", keys:{}, ...TTS_PROVIDERS.elevenlabs, voices:[],
+  style:"Spreek Nederlands. Je bent een warme, geheimzinnige verteller van een detectiveverhaal voor kinderen van 6 tot 10 jaar. Spreek rustig en duidelijk, met spanning en plezier." };
+delete TTS_DEFAULT.name;
+
 // Mistral's image tool never sees the photo: it only gets the text prompt the agent writes.
 // So the agent has to put a very precise description of the photo into that prompt.
 const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as possible to the original photo. The image_generation tool CANNOT see the photo; it only gets your text prompt. So: 1) Study the attached photo closely. 2) Call the image_generation tool with ONE long, concrete English prompt that describes the photo exactly: the camera angle and framing (close-up, half body, full body), how many people there are and, for each person from left to right, their position, approximate age, build, skin tone, face shape, hair colour, length and style, glasses, facial expression, pose, what they hold, and their clothes with exact colours and patterns; then the background, setting, lighting and main colours. Then add the requested style changes on top of that, without changing the people, their clothes colours, the composition or the background. Ask for the same aspect ratio as the photo. 3) You MUST call the tool: never answer with only text and never describe an image you did not generate. After the tool has made the picture, reply with one short sentence.";
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 15;
-const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1";
+const VERSION = 16;
+const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
 
@@ -228,6 +241,8 @@ let ai = Object.assign({}, AI_DEFAULT, load(KEY_AI, {}));
 if (ai.key){ ai.keys = { ...ai.keys, openai: ai.keys.openai || ai.key }; delete ai.key; } // settings from the first version
 if (ai.visionModel == null) ai.visionModel = PROVIDERS[ai.provider]?.vision || "";
 const aiKey = () => (ai.keys[ai.provider] || "").trim();
+let tts = Object.assign({}, TTS_DEFAULT, load(KEY_TTS, {}));
+const ttsKey = () => (tts.keys[tts.provider] || "").trim();
 let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0, matchInfo:{} };
 
 /* ---------- parents' lock: a sum or a PIN; asked every time the menu opens ---------- */
@@ -252,13 +267,15 @@ const scrambled = (a, same) => { let r=a; for(let t=0;t<30;t++){ r=shuffle(a); i
 const imgs = new Map(); // id -> object URL
 const DB = (()=>{
   let p;
-  const open = () => p || (p = new Promise((res,rej)=>{ const r=indexedDB.open("speurtocht",1);
-    r.onupgradeneeded=()=>r.result.createObjectStore("img"); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }));
-  const run = (mode, fn) => open().then(db=>new Promise((res,rej)=>{ const t=db.transaction("img",mode); fn(t.objectStore("img")); t.oncomplete=res; t.onerror=()=>rej(t.error); }));
+  // "img" = photos, "tts" = spoken lines (mp3 blobs)
+  const open = () => p || (p = new Promise((res,rej)=>{ const r=indexedDB.open("speurtocht",2);
+    r.onupgradeneeded=()=>{ for (const n of ["img","tts"]) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }));
+  const run = (store, mode, fn) => open().then(db=>new Promise((res,rej)=>{ const t=db.transaction(store,mode); fn(t.objectStore(store)); t.oncomplete=res; t.onerror=()=>rej(t.error); }));
   return {
-    put:(k,v)=>run("readwrite", s=>s.put(v,k)),
-    del:k=>run("readwrite", s=>s.delete(k)),
-    all:()=>open().then(db=>new Promise((res,rej)=>{ const out=new Map(), c=db.transaction("img").objectStore("img").openCursor();
+    put:(k,v,store="img")=>run(store, "readwrite", s=>s.put(v,k)),
+    del:(k,store="img")=>run(store, "readwrite", s=>s.delete(k)),
+    all:(store="img")=>open().then(db=>new Promise((res,rej)=>{ const out=new Map(), c=db.transaction(store).objectStore(store).openCursor();
       c.onsuccess=()=>{ const cur=c.result; if(cur){ out.set(cur.key,cur.value); cur.continue(); } else res(out); }; c.onerror=()=>rej(c.error); }))
   };
 })();
@@ -318,7 +335,7 @@ const b64ToBlob = (b64, type="image/png") => { const bin=atob(b64), u8=new Uint8
 const apiUrl = path => ai.base.trim().replace(/\/+$/,"") + path;
 // Every request of the current drawing is logged, so a failure can say which step went wrong.
 let aiLog = [];
-const errText = j => { for (const v of [j.error?.message, j.error, j.message, j.detail?.[0]?.msg, j.detail]) if (v) return typeof v==="string" ? v : JSON.stringify(v);
+const errText = j => { for (const v of [j.error?.message, j.error, j.message, j.detail?.[0]?.msg, j.detail?.message, j.detail]) if (v) return typeof v==="string" ? v : JSON.stringify(v);
   return ""; };
 async function api(path, opts={}){
   const headers = { Authorization:`Bearer ${aiKey()}`, ...(opts.json ? { "Content-Type":"application/json" } : {}) };
@@ -448,9 +465,12 @@ async function aiDraw(id){
 
 /* ---------- sound ---------- */
 let actx;
+// Made on a tap (iOS only allows sound after one); the voice clips play through the same context.
+const getAudio = () => { try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)(); if (actx.state==="suspended") actx.resume().catch(()=>{}); }catch(e){} return actx; };
+document.addEventListener("pointerdown", ()=>{ if (actx?.state==="suspended") actx.resume().catch(()=>{}); }, true);
 function beep(ok){
   try{
-    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    getAudio();
     const notes = ok ? [523,659,784,1047] : [220,180];
     notes.forEach((f,i)=>{
       const o=actx.createOscillator(), g=actx.createGain();
@@ -465,12 +485,112 @@ function beep(ok){
 
 function tick(high){
   try{
-    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    getAudio();
     const o=actx.createOscillator(), g=actx.createGain(), t=actx.currentTime;
     o.frequency.value = high ? 1320 : 880; g.gain.setValueAtTime(.2,t); g.gain.exponentialRampToValueAtTime(.0001,t+.15);
     o.connect(g).connect(actx.destination); o.start(t); o.stop(t+.2);
   }catch(e){}
 }
+
+/* ---------- voice: every line is spoken in advance and kept in IndexedDB ---------- */
+const clips = new Map(), buffers = new Map(); // key -> mp3 blob / decoded AudioBuffer
+const JIG_DONE = "Gelukt! Nu weten jullie waar het briefje ligt. Snel, ga kijken!";
+const clueText = (s, k) => s.clue || { photo:"Waar is dit? Zoek de plek van de foto. Daar ligt een briefje met een geheime code!",
+  jigsaw:"De foto is in stukjes gevallen! Tik op twee stukjes om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
+  match:"Waar is deze plek? Zoek hem en maak er een foto van, vanaf dezelfde kant als de tekening. De meter zegt of jullie warm of koud zijn!" }[k] || "";
+const MSG = { wrongCode:"Die code klopt niet. Kijk nog eens goed op het briefje!", wrongSuspect:"Nee hoor! Kijk nog eens goed naar de bewijsstukken." };
+const speakable = t => String(t||"").replace(/[\p{Extended_Pictographic}️‍]/gu, "").replace(/\s*\n\s*/g, " ").replace(/\s{2,}/g, " ").trim();
+// slot -> text. The final line holds the team name, so it is spoken when the kids tap Start.
+function speechLines(team){
+  const L = { story:`${cfg.title}. ${cfg.story}`, ...MSG,
+    accuse:"Alle bewijs is verzameld! Wie heeft de taart gepikt? Lees alle bewijsstukken goed. Overleg samen en tik dan op de dader!",
+    final:`Zaak opgelost! Goed gedaan, ${team || "detectives"}! ${cfg.suspects[cfg.culpritIndex]} was de dader! En de taart is verstopt: ${cfg.finalHide}. Ga snel kijken!` };
+  cfg.steps.forEach((s,i)=>{ const k = kind(s);
+    L[`clue${i}`] = clueText(s, k);
+    if (s.hint && k!=="camera") L[`hint${i}`] = `Tip: ${s.hint}`;
+    if (s.evidence) L[`ev${i}`] = `Goed zo! Bewijsstuk ${i+1}. ${s.evidence}`;
+    if (k==="jigsaw") L[`jig${i}`] = JIG_DONE;
+  });
+  for (const k in L){ L[k] = speakable(L[k]); if (!L[k]) delete L[k]; }
+  return L;
+}
+const hash = str => { let h1=0xdeadbeef, h2=0x41c6ce57; for (let i=0;i<str.length;i++){ const c=str.charCodeAt(i); h1=Math.imul(h1^c,2654435761); h2=Math.imul(h2^c,1597334677); }
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909); h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (4294967296*(2097151&h2)+(h1>>>0)).toString(36); };
+// A clip is reused only for the same text with the same voice settings.
+const lineKey = text => "v-" + hash([tts.provider, tts.base, tts.model, tts.voice, tts.style, text].join("|"));
+const ttsReady = () => !!(tts.on && ttsKey() && tts.base && tts.model && tts.voice);
+
+async function ttsFetch(path, json){
+  const url = tts.base.trim().replace(/\/+$/,"") + path;
+  const headers = { ...(tts.provider==="elevenlabs" ? { "xi-api-key":ttsKey() } : { Authorization:`Bearer ${ttsKey()}` }), ...(json ? { "Content-Type":"application/json" } : {}) };
+  let r;
+  try{ r = await fetch(url, { method: json ? "POST" : "GET", headers, body: json && JSON.stringify(json) }); }
+  catch(e){ const host = (()=>{ try{ return new URL(url).host; }catch(_){ return tts.base; } })();
+    throw new Error(`${host} gaf geen antwoord. Is er internet? Zo ja, dan blokkeert de browser dit verzoek (CORS).`); }
+  if (!r.ok){ const txt = await r.text().catch(()=>""), j = (()=>{ try{ return JSON.parse(txt); }catch(_){ return {}; } })();
+    throw new Error(`${r.status}: ${(errText(j) || txt || r.statusText).slice(0,200)}`); }
+  return r;
+}
+async function synth(text){
+  const r = tts.provider==="elevenlabs"
+    ? await ttsFetch(`/text-to-speech/${encodeURIComponent(tts.voice)}?output_format=mp3_44100_128`, { text, model_id:tts.model })
+    : await ttsFetch("/audio/speech", { model:tts.model, voice:tts.voice, input:text, response_format:"mp3",
+        ...(tts.style && !/^tts-1/.test(tts.model) ? { instructions:tts.style } : {}) }); // tts-1 doesn't take instructions
+  const blob = await r.blob();
+  if (!blob.size || /json|text/.test(blob.type)) throw new Error("Geen geluid ontvangen");
+  return blob;
+}
+async function fetchVoices(){
+  if (tts.provider==="openai") return OPENAI_VOICES.map(id=>({ id, name:id }));
+  if (tts.provider==="elevenlabs"){ // own voices (cloned, designed, from the library) first
+    const j = await (await ttsFetch("/voices")).json();
+    return (j.voices||[]).map(v=>({ id:v.voice_id, name:v.name, own:v.category!=="premade" })).sort((a,b)=>(b.own-a.own) || a.name.localeCompare(b.name));
+  }
+  const j = await (await ttsFetch("/audio/voices")).json(), list = Array.isArray(j) ? j : (j.voices || j.data || []);
+  return list.map(v=> typeof v==="string" ? { id:v, name:v } : { id:v.id||v.voice_id||v.name, name:v.name||v.id }).filter(v=>v.id);
+}
+// Speaks every line that isn't stored yet; progress(done, total).
+async function prepareSpeech(team, progress=()=>{}){
+  const todo = [...new Set(Object.values(speechLines(team)))].filter(t=>!clips.has(lineKey(t))), total = todo.length;
+  let done = 0, failed = false; progress(done, total);
+  const worker = async () => { try{ while (todo.length && !failed){ const t = todo.shift(), k = lineKey(t), b = await synth(t);
+    clips.set(k, b); DB.put(k, b, "tts").catch(()=>{}); if (!failed) progress(++done, total); } }
+    catch(e){ failed = true; throw e; } };
+  await Promise.all([worker(), worker()]); // two at a time: quicker, and within ElevenLabs' smallest concurrency limit
+}
+function gcClips(team){
+  const keep = new Set(Object.values(speechLines(team)).map(lineKey));
+  [...clips.keys()].forEach(k=>{ if (!keep.has(k)){ clips.delete(k); buffers.delete(k); DB.del(k, "tts").catch(()=>{}); } });
+}
+const hasClip = slot => { const t = ttsReady() && speechLines(prog.team)[slot]; return !!t && clips.has(lineKey(t)); };
+let voiceSrc = null, sayToken = 0;
+function hush(){ sayToken++; try{ voiceSrc?.stop(); }catch(e){} voiceSrc = null; }
+async function playBlob(key, blob, delay=0){
+  hush(); const token = sayToken;
+  if (!actx || !blob) return false;
+  try{
+    let buf = buffers.get(key);
+    if (!buf){ buf = await actx.decodeAudioData(await blob.arrayBuffer()); if (key) buffers.set(key, buf); }
+    if (token !== sayToken) return true; // something else started talking meanwhile
+    const src = actx.createBufferSource(); src.buffer = buf; src.connect(actx.destination); src.start(actx.currentTime + delay); voiceSrc = src;
+    return true;
+  }catch(e){ console.warn(e); return false; }
+}
+function say(slot, delay){
+  if (!ttsReady()) return;
+  const t = speechLines(prog.team)[slot], k = t && lineKey(t);
+  playBlob(k, k && clips.get(k), delay);
+}
+// The line that goes with what's on screen; it is read once when the screen appears.
+// undefined = an overlay without a line (e.g. parents approving): quiet, without re-reading the screen after it closes.
+function autoSlot(){
+  if (ui.view) return "";
+  if (ui.overlay) return ui.overlaySlot ?? undefined;
+  if (prog.phase==="clue"){ const s = cfg.steps[prog.index]; return kind(s)==="jigsaw" && prog.sub.solved ? `jig${prog.index}` : `clue${prog.index}`; }
+  return { accuse:"accuse", solved:"final" }[prog.phase] || "";
+}
+const sayBtn = (slot, label="🔊 Nog een keer") => hasClip(slot) ? `<button class="btn ghost small say" data-act="say" data-slot="${slot}">${label}</button>` : "";
 
 /* ---------- in-game camera (live viewfinder; falls back to the system camera via a file input) ---------- */
 const cam = { stream:null, pending:null, facing:"user", error:false, busy:false };
@@ -847,7 +967,7 @@ function renderStart(){
   return folder("DOSSIER #8 · STRENG GEHEIM", `
     <span class="stamp">GEHEIM</span>
     <h1>${esc(cfg.title)}</h1>
-    <div class="paper tilt"><span class="tape"></span><p>${esc(cfg.story)}</p></div>
+    <div class="paper tilt"><span class="tape"></span><p>${esc(cfg.story)}</p>${sayBtn("story", "🔊 Lees het verhaal voor")}</div>
     <div>
       <label class="lbl" for="team">Hoe heet jullie detectivebureau?</label>
       <input type="text" id="team" maxlength="40" placeholder="Bijv. De Speurneuzen" value="${esc(prog.team)}">
@@ -871,9 +991,7 @@ function renderClue(){
   const i = prog.index, s = cfg.steps[i], n = cfg.steps.length, k = kind(s), sub = prog.sub;
   const dots = cfg.steps.map((_,j)=>`<span class="dot ${j<i?"done":j===i?"now":""}"></span>`).join("");
   const label = { code:"AANWIJZING", photo:"WAAR IS DIT?", jigsaw:"FOTOPUZZEL", scramble:"LETTERPUZZEL", camera:"FOTO-OPDRACHT", match:"FOTOJACHT" }[k];
-  let text = s.clue || { photo:"Waar is dit? Zoek de plek van de foto. Daar ligt een briefje met een geheime code!",
-    jigsaw:"De foto is in stukjes gevallen! Tik op twee stukjes om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
-    match:"Waar is deze plek? Zoek hem en maak er een foto van, vanaf dezelfde kant als de tekening. De meter zegt of jullie warm of koud zijn!" }[k] || "";
+  let text = clueText(s, k), slot = `clue${i}`;
   // selfies for photo assignments, the back camera for finding a spot (once per step, so "Andere camera" sticks)
   if ((k==="camera" || k==="match") && ui.camStep!==i){ ui.camStep = i; const want = k==="match" ? "environment" : "user";
     if (cam.facing!==want){ cam.facing = want; camStop(); } }
@@ -889,7 +1007,7 @@ function renderClue(){
   if (k==="jigsaw"){
     if (!sub.order){ sub.order = scrambled([...Array(9).keys()], r=>r.every((v,j)=>v===j)); saveProg(); }
     if (sub.solved){
-      text = "Gelukt! Nu weten jullie waar het briefje ligt. Snel, ga kijken!";
+      text = JIG_DONE; slot = `jig${i}`;
       extra = `<img class="full" src="${imgs.get(s.photo)}" alt="De verstopplek">`;
       after = hint + codeForm();
     } else {
@@ -959,6 +1077,7 @@ function renderClue(){
       <p class="type muted" style="margin-bottom:8px">${label} ${i+1}</p>
       ${text ? `<p class="riddle">${esc(text)}</p>` : ""}
       ${extra}
+      ${sayBtn(slot)}
     </div>
     ${after}
     ${evidenceList(i)}
@@ -970,6 +1089,7 @@ function renderAccuse(){
     <span class="stamp">ALLE BEWIJS VERZAMELD</span>
     <h2>Wie heeft de taart gepikt?</h2>
     <p>Lees alle bewijsstukken goed. Overleg samen en tik dan op de dader!</p>
+    ${sayBtn("accuse")}
     ${evidenceList(cfg.steps.length)}
     <div class="suspects">${cfg.suspects.map((n,k)=>`<button class="suspect ${prog.wrongSuspects.includes(k)?"wrong":""}" data-act="accuse" data-k="${k}" ${prog.wrongSuspects.includes(k)?"disabled":""}>${esc(n)}</button>`).join("")}</div>
     <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>
@@ -983,6 +1103,7 @@ function renderSolved(){
     <div class="paper tilt"><span class="tape"></span>
       <p><b>${esc(cfg.suspects[cfg.culpritIndex])}</b> was de dader! En de taart is verstopt…</p>
       <p class="riddle" style="margin-top:12px">${esc(cfg.finalHide)}</p>
+      ${sayBtn("final")}
     </div>
     <p>Ga snel kijken! 🎉</p>
     ${album()}
@@ -1073,6 +1194,45 @@ function stepEditor(s, i){
     </div>`;
 }
 
+function ttsEditor(){
+  const v = tts.voices.length ? `<select id="tts-voice">${(tts.voices.some(x=>x.id===tts.voice) ? [] : [{ id:tts.voice, name:tts.voice }]).concat(tts.voices)
+      .map(x=>`<option value="${esc(x.id)}" ${x.id===tts.voice?"selected":""}>${x.own?"★ ":""}${esc(x.name)}</option>`).join("")}</select>`
+    : `<input type="text" id="tts-voice" spellcheck="false" value="${esc(tts.voice)}">`;
+  return `
+    <h2 style="font-size:20px;margin-top:8px">Voorlezen (optioneel)</h2>
+    <p class="muted" style="font-size:16px">Een stem leest het verhaal, de raadsels, tips en bewijsstukken voor. Alles wordt vóór het spel één keer ingesproken
+      en op dit apparaat bewaard, dus tijdens het spel is er geen internet nodig. Wat nog ontbreekt (zoals de zin met de teamnaam) wordt ingesproken als de kinderen op Start tikken.</p>
+    <label class="check"><input type="checkbox" id="tts-on" ${tts.on?"checked":""}> Teksten voorlezen</label>
+    ${tts.on ? `
+    <div><label class="lbl" for="tts-provider">Dienst</label>
+      <select id="tts-provider">${Object.entries(TTS_PROVIDERS).map(([k,p])=>`<option value="${k}" ${k===tts.provider?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+    <p class="muted" style="font-size:15px">${{ elevenlabs:"Eigen stem: maak bij ElevenLabs een kloon van je eigen stem (Voice Cloning) of ontwerp er een (Voice Design), of voeg er een toe uit de Voice Library. Tik daarna op “Stemmen ophalen”; ★ = jouw eigen stemmen.",
+        openai:"OpenAI heeft vaste stemmen, maar je kunt hieronder beschrijven hoe de stem moet klinken (alleen bij gpt-4o-mini-tts).",
+        custom:"Voor een eigen server met een OpenAI-achtige /audio/speech, bijv. een server met stemklonen. De server moet verzoeken uit de browser toestaan (CORS)." }[tts.provider] || ""}</p>
+    <div><label class="lbl" for="tts-base">Adres (endpoint)</label><input type="text" id="tts-base" inputmode="url" spellcheck="false" placeholder="https://…/v1" value="${esc(tts.base)}"></div>
+    <div><label class="lbl" for="tts-key">API-sleutel</label><input type="password" id="tts-key" autocomplete="off" value="${esc(ttsKey())}"></div>
+    <div class="row">
+      <div><label class="lbl" for="tts-model">Model</label><input type="text" id="tts-model" spellcheck="false" value="${esc(tts.model)}"></div>
+      <div><label class="lbl" for="tts-voice">Stem</label>${v}</div>
+    </div>
+    ${tts.provider==="elevenlabs" ? `<p class="muted" style="font-size:14px">Modellen: eleven_multilingual_v2 (beste Nederlands), eleven_flash_v2_5 (goedkoper), eleven_v3 (meest expressief).</p>`
+      : `<div><label class="lbl" for="tts-style">Hoe moet de stem klinken?</label><textarea id="tts-style">${esc(tts.style)}</textarea></div>`}
+    <div class="row">
+      <button class="btn alt small" data-act="loadVoices">Stemmen ophalen</button>
+      <button class="btn alt small" data-act="testVoice">Test de stem</button>
+      ${tts.voices.length ? `<button class="btn alt small" data-act="typeVoice">Zelf een stem-ID typen</button>` : ""}
+    </div>
+    <button class="btn alt" data-act="prepVoice">🎙 Alles nu inspreken</button>` : ""}
+    <p class="msg" id="ttsMsg" aria-live="polite">${esc(ttsStatus())}</p>`;
+}
+function ttsStatus(){
+  if (!tts.on) return "";
+  if (!ttsReady()) return "Vul een sleutel, adres, model en stem in.";
+  const all = [...new Set(Object.values(speechLines(prog.team)))], done = all.filter(t=>clips.has(lineKey(t))).length;
+  return done===all.length ? `✓ Alle ${all.length} zinnen zijn ingesproken.` : `${done} van ${all.length} zinnen ingesproken. Tik op “Alles nu inspreken” (kost een paar cent).`;
+}
+const ttsMsg = t => { const m=document.getElementById("ttsMsg"); if(m) m.textContent=t; };
+
 function renderSetup(){
   const notes = cfg.steps.map((s,i)=>NOTE_TYPES.includes(s.type||"code") ? `<div><span>${i+1}. ${esc(s.place)}</span><b>${esc(norm(s.code))}</b></div>` : "").join("");
   return folder("INSTELLINGEN · OUDERS", `
@@ -1127,12 +1287,13 @@ function renderSetup(){
       <input type="text" id="ai-vision" list="ai-vision-list" spellcheck="false" placeholder="bijv. gpt-4.1-mini" value="${esc(ai.visionModel)}">
       <datalist id="ai-vision-list">${ai.models.filter(m=>!m.img).map(m=>`<option value="${esc(m.id)}">`).join("")}</datalist></div>
     <p class="muted" style="font-size:14px">${aiVerifyReady() ? "✓ De AI kijkt mee." : ai.verify && !aiKey() ? "Nog geen sleutel: alleen de tablet keurt de foto's." : ai.verify ? "Vul een model in." : "Uit: alleen de tablet keurt de foto's."}</p>
+    ${ttsEditor()}
     <button class="btn" data-act="saveSetup">Opslaan</button>
     <h2 style="font-size:20px;margin-top:8px">Briefjes om te schrijven</h2>
     <p class="muted" style="font-size:16px">Schrijf elke code op een briefje en leg het op de juiste plek. Hoofdletters of spaties maken niet uit.</p>
     <div class="notes-list">${notes}</div>
     <h2 style="font-size:20px;margin-top:8px">Overzetten naar ander apparaat</h2>
-    <p class="muted" style="font-size:16px">Kopieer deze tekst, open het spel op het andere apparaat, ga naar Instellingen en plak hem hieronder. Foto's en de AI-sleutel gaan niet mee: voeg die daar opnieuw toe.</p>
+    <p class="muted" style="font-size:16px">Kopieer deze tekst, open het spel op het andere apparaat, ga naar Instellingen en plak hem hieronder. Foto's, ingesproken stemmen en de API-sleutels gaan niet mee: voeg die daar opnieuw toe.</p>
     <textarea id="s-json" class="type" style="font-size:13px;min-height:110px">${esc(JSON.stringify(cfg))}</textarea>
     <div class="row">
       <button class="btn alt small" data-act="copyJson">Kopieer</button>
@@ -1161,6 +1322,9 @@ function render(){
   app.innerHTML = html;
   camAttach();
   if (document.getElementById("vf") && kind(cfg.steps[prog.index]||{})==="match") huntLoop();
+  const slot = autoSlot();
+  if (slot === undefined) hush();
+  else if (slot !== ui.spoken){ ui.spoken = slot; slot ? say(slot) : hush(); }
   const ci = document.getElementById("code");
   if (ci && !ui.overlay && kind(cfg.steps[prog.index]||{})==="code") ci.focus({preventScroll:true});
 }
@@ -1176,7 +1340,16 @@ function collectSetup(){
   cfg.suspects = sus.length>=2 ? sus : cfg.suspects;
   cfg.culpritIndex = Math.min(+document.getElementById("s-culprit").value||0, cfg.suspects.length-1);
   cfg.finalHide = document.getElementById("s-final").value.trim();
-  collectAi();
+  collectAi(); collectTts();
+}
+
+function collectTts(){
+  const val = id => document.getElementById(id)?.value.trim();
+  tts.on = !!document.getElementById("tts-on")?.checked;
+  if (!document.getElementById("tts-base")) return;
+  tts.keys = { ...tts.keys, [tts.provider]: val("tts-key") };
+  tts.base = val("tts-base"); tts.model = val("tts-model"); tts.voice = val("tts-voice");
+  if (document.getElementById("tts-style")) tts.style = val("tts-style");
 }
 
 function collectAi(){
@@ -1215,11 +1388,38 @@ function solveStep(){
   const s = cfg.steps[prog.index], k = kind(s), last = prog.index===cfg.steps.length-1;
   beep(true); confetti();
   const stamp = { scramble:"PUZZEL OPGELOST!", camera:"FOTO IN HET DOSSIER!", match:"PLEK GEVONDEN!" }[k] || "CODE GOED!";
+  ui.overlaySlot = s.evidence ? `ev${prog.index}` : "";
   ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="${stamp}"><div class="paper stack"><span class="tape"></span>
     <span class="stamp" style="color:var(--good);border-color:var(--good)">${stamp}</span>
-    ${s.evidence ? `<p class="type muted">BEWIJSSTUK #${prog.index+1}</p><p class="riddle" style="font-size:20px">${esc(s.evidence)}</p>` : ""}
+    ${s.evidence ? `<p class="type muted">BEWIJSSTUK #${prog.index+1}</p><p class="riddle" style="font-size:20px">${esc(s.evidence)}</p>${sayBtn(`ev${prog.index}`)}` : ""}
     <button class="btn" data-act="next">${last?"Naar de ontknoping":"Volgende opdracht"}</button></div></div>`;
   render(); app.querySelector(".overlay .btn")?.focus();
+}
+
+// Before the game starts, every line that isn't stored yet is spoken (with a progress screen).
+async function voiceFirst(act, team){
+  if (!ttsReady() || ui.skipVoice) return true;
+  const box = inner => { ui.overlaySlot = ""; ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="De stem wordt ingesproken">
+    <div class="paper stack"><span class="tape"></span>${inner}</div></div>`; render(); };
+  ui.prepTeam = team;
+  try{
+    await prepareSpeech(team, (d,n)=>{ if (!n) return; const t = `De verteller leest de dossiers door… ${d} van ${n}`, m = document.getElementById("prepMsg");
+      m ? (m.textContent = t) : box(`<div class="busy"><span class="glass">🎙</span><p id="prepMsg">${esc(t)}</p></div>`); });
+    ui.overlay = null; return true;
+  }catch(err){
+    box(`<p><b>Het inspreken van de stem lukte niet.</b></p><p class="muted" style="font-size:15px">${esc(err.message||String(err))}</p>
+      <div class="row"><button class="btn" data-act="${act}">Opnieuw proberen</button><button class="btn alt" data-act="skipVoice" data-then="${act}">Start zonder stem</button></div>`);
+    return false;
+  }
+}
+async function enterGame(act, team){
+  if (ui.entering) return;
+  ui.entering = true;
+  try{ if (!(await voiceFirst(act, team))) return; }
+  finally{ ui.entering = false; }
+  if (act==="begin"){ prog = newProg(team, "clue"); ui.hintShown=false; ui.zoom=0; }
+  else { prog.team = team; if (prog.phase==="start") prog.phase="clue"; }
+  keepAwake(); saveProg(); render(); if (act==="begin") scrollTo(0,0);
 }
 
 /* ---------- events ---------- */
@@ -1231,15 +1431,16 @@ app.addEventListener("click", async e=>{
   const i=+b.dataset.i, sub=prog.sub;
   ui.msg="";
   switch(act){
-    case "begin": case "restart":
-      if (act==="restart" && prog.phase!=="start" && !b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker weten? Tik nog een keer"; return; }
-      prog = newProg((document.getElementById("team")?.value||prog.team||"").trim(), act==="begin"?"clue":"start");
-      if(act==="begin"){ keepAwake(); beep(true); }
+    case "begin": case "resume":
+      if (act==="begin") beep(true); else getAudio(); // the voice needs the sound unlocked by this tap
+      enterGame(act, (document.getElementById("team")?.value||prog.team||"").trim()); break;
+    case "skipVoice": ui.skipVoice=true; ui.overlay=null; enterGame(b.dataset.then, ui.prepTeam||""); break;
+    case "restart":
+      if (prog.phase!=="start" && !b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker weten? Tik nog een keer"; return; }
+      prog = newProg((document.getElementById("team")?.value||prog.team||"").trim(), "start");
       ui.hintShown=false; ui.zoom=0; saveProg(); render(); scrollTo(0,0); break;
-    case "resume":
-      prog.team=(document.getElementById("team")?.value||prog.team).trim(); if(prog.phase==="start") prog.phase="clue";
-      keepAwake(); saveProg(); render(); break;
-    case "hint": ui.hintShown=true; render(); break;
+    case "hint": ui.hintShown=true; render(); say(`hint${prog.index}`); break;
+    case "say": getAudio(); say(b.dataset.slot); break;
     case "zoomOut": ui.zoom=Math.min(ui.zoom+1, ZOOMS.length-1); render(); break;
     case "tile": {
       const p=+b.dataset.p;
@@ -1276,13 +1477,13 @@ app.addEventListener("click", async e=>{
     case "usePhoto":
       prog.photos.push({ id: sub.styled||sub.photo, orig: sub.photo }); prog.sub={}; saveProg(); solveStep(); break;
     case "next":
-      ui.overlay=null; ui.hintShown=false; ui.zoom=0; ui.aiError=""; ui.ghost=false; hunt.warm=0; hunt.band=0; prog.sub={};
+      ui.overlay=null; ui.overlaySlot=null; ui.hintShown=false; ui.zoom=0; ui.aiError=""; ui.ghost=false; hunt.warm=0; hunt.band=0; prog.sub={};
       prog.index++; prog.phase = prog.index>=cfg.steps.length ? "accuse" : "clue";
       saveProg(); render(); scrollTo(0,0); break;
     case "accuse": {
       const k=+b.dataset.k;
       if(k===cfg.culpritIndex){ prog.phase="solved"; saveProg(); beep(true); render(); confetti(); scrollTo(0,0); }
-      else { prog.wrongSuspects.push(k); saveProg(); beep(false); ui.msg="Nee hoor! Kijk nog eens goed naar de bewijsstukken."; render(); }
+      else { prog.wrongSuspects.push(k); saveProg(); beep(false); ui.msg=MSG.wrongSuspect; render(); say("wrongSuspect", .35); }
       break; }
     case "party": beep(true); confetti(); break;
     case "loadModels":
@@ -1309,6 +1510,28 @@ app.addEventListener("click", async e=>{
         box.innerHTML = `<div class="hint-box"><b>Dat lukte niet.</b><br>${esc(err.message||String(err))}<pre class="ailog">${esc((err.log||[]).join("\n"))}</pre></div>`;
       }
       dropImage(inId); break; }
+    case "loadVoices":
+      collectTts(); save(KEY_TTS, tts); if(!tts.base) return ttsMsg("Vul eerst het adres in."); ttsMsg("Stemmen ophalen…");
+      try{ const vs = await fetchVoices(); if(!vs.length) throw new Error("Geen stemmen gevonden");
+        tts.voices = vs; save(KEY_TTS, tts); collectSetup(); render(); ttsMsg(`${vs.length} stemmen gevonden. Kies er een.`); }
+      catch(err){ ttsMsg(`Ophalen lukte niet: ${err.message}`); }
+      break;
+    case "testVoice":
+      collectTts(); save(KEY_TTS, tts); getAudio();
+      if(!ttsReady()) return ttsMsg("Vul eerst een sleutel, adres, model en stem in.");
+      ttsMsg("Even inspreken…");
+      try{ if (!(await playBlob(null, await synth(`Hallo detectives! Ik ben de verteller van ${cfg.title}. Zijn jullie er klaar voor?`)))) throw new Error("het geluid kon niet afgespeeld worden.");
+        ttsMsg("✓ Hoor je de stem? Dan werkt het."); }
+      catch(err){ ttsMsg(`Dat lukte niet: ${err.message}`); }
+      break;
+    case "typeVoice": collectSetup(); tts.voices=[]; save(KEY_TTS, tts); render(); document.getElementById("tts-voice")?.focus(); break;
+    case "prepVoice":
+      collectSetup(); save(KEY_TTS, tts);
+      if(!ttsReady()) return ttsMsg("Vul eerst een sleutel, adres, model en stem in.");
+      b.disabled = true;
+      try{ await prepareSpeech(prog.team, (d,n)=>ttsMsg(n ? `Inspreken… ${d} van ${n}` : "")); gcClips(prog.team); ttsMsg(ttsStatus()); }
+      catch(err){ ttsMsg(`Inspreken lukte niet: ${err.message}`); }
+      b.disabled = false; break;
     case "typeModel": collectSetup(); ai.models=[]; render(); document.getElementById("ai-model")?.focus(); break;
     case "fullscreen": ui.wantFs = !isFs(); ui.wantFs ? goFull() : exitFull(); break;
     case "openSetup": ui.view="gate"; ui.gateQ=null; ui.recover=false; render(); scrollTo(0,0); document.getElementById("gate")?.focus(); break;
@@ -1329,7 +1552,7 @@ app.addEventListener("click", async e=>{
     case "del": collectSetup(); if(cfg.steps.length>1){ cfg.steps.splice(i,1); } render(); break;
     case "up": case "down": { collectSetup(); const j = act==="up"?i-1:i+1; [cfg.steps[i],cfg.steps[j]]=[cfg.steps[j],cfg.steps[i]]; render(); break; }
     case "saveSetup": {
-      collectSetup(); save(KEY_AI, ai);
+      collectSetup(); save(KEY_AI, ai); save(KEY_TTS, tts);
       const bad = cfg.steps.findIndex(s=>stepProblem(s));
       if(bad>=0){ setupMsg(`Stap ${bad+1} ${stepProblem(cfg.steps[bad])}.`); return; }
       for (const st of cfg.steps) if (st.type==="match" && imgs.has(st.photo) && !imgs.has(st.sketch)){ // e.g. a "Waar is dit?" photo reused
@@ -1360,6 +1583,14 @@ app.addEventListener("change", async e=>{
   if(t.matches('select[data-f="type"]') || t.id==="ai-style"){ collectSetup(); if(t.id==="ai-style") save(KEY_AI, ai); render(); return; }
   if(t.id==="ai-model"){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); return; }
   if(t.id==="ai-verify"){ collectSetup(); save(KEY_AI, ai); render(); return; }
+  if(t.id==="tts-on"){ collectSetup(); save(KEY_TTS, tts); render(); document.getElementById("tts-on")?.scrollIntoView({block:"center"}); return; }
+  if(t.id==="tts-voice"){ collectTts(); save(KEY_TTS, tts); ttsMsg(ttsStatus()); return; }
+  if(t.id==="tts-provider"){
+    collectSetup(); const p = TTS_PROVIDERS[t.value];
+    tts.provider = t.value; tts.voices = [];
+    if (t.value!=="custom"){ tts.base = p.base; tts.model = p.model; tts.voice = p.voice; }
+    save(KEY_TTS, tts); render(); return;
+  }
   if(t.id==="lock-mode"){ collectSetup(); ui.lockDraft=t.value; render(); document.getElementById("lock-mode")?.scrollIntoView({block:"center"}); return; }
   if(t.id==="ai-provider"){
     collectSetup(); const p = PROVIDERS[t.value];
@@ -1413,7 +1644,7 @@ app.addEventListener("submit", e=>{
     if(norm(input.value)===norm(s.code)) solveStep();
     else {
       beep(false); input.classList.remove("shake"); void input.offsetWidth; input.classList.add("shake");
-      document.getElementById("msg").textContent = "Die code klopt niet. Kijk nog eens goed op het briefje!";
+      document.getElementById("msg").textContent = MSG.wrongCode; say("wrongCode", .35);
       input.select();
     }
   }
@@ -1440,11 +1671,14 @@ app.addEventListener("submit", e=>{
 app.addEventListener("input", e=>{
   if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); }
   if(/^ai-(key|base|model|prompt|vision)$/.test(e.target.id)){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); }
+  if(/^tts-(key|base|model|voice|style)$/.test(e.target.id)){ collectTts(); save(KEY_TTS, tts); ttsMsg(ttsStatus()); }
 });
 
 window.claude?.hot?.snapshot?.(()=>({ ui:{} })); // never restore an unlocked menu
 function start(data){
-  DB.all().then(m=>m.forEach((blob,k)=>imgs.set(k, typeof blob==="string" ? blob : URL.createObjectURL(blob)))).catch(()=>{}).finally(render);
+  const photos = DB.all().then(m=>m.forEach((blob,k)=>imgs.set(k, typeof blob==="string" ? blob : URL.createObjectURL(blob)))).catch(()=>{});
+  const voice = DB.all("tts").then(m=>m.forEach((blob,k)=>clips.set(k, blob))).catch(()=>{});
+  Promise.all([photos, voice]).finally(render);
 }
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
 })();
