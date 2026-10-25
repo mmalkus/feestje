@@ -149,7 +149,21 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .viewfinder .flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none}
 .viewfinder .flash.go{animation:flash .5s ease-out}
 @keyframes flash{from{opacity:1} to{opacity:0}}
+/* "Zoek deze plek": the drawing, the viewfinder and the snap button share one phone screen, so nobody scrolls while aiming.
+   The room left after the text and buttons (about 450px) goes 45/55 to the drawing and the viewfinder. */
 .full.sketch{max-height:42vh; background:#fff}
+.paper.hunt{padding-block:16px}
+.paper.hunt .riddle{font-size:clamp(16px, 4.6vw, 20px); line-height:1.4}
+.paper.hunt .full.sketch{max-height:min(42vh, max(110px, calc((100vh - 450px) * .45)))}
+.viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62vh, max(150px, calc((100vh - 450px) * .55)))))}
+@supports (height:100svh){
+  .paper.hunt .full.sketch{max-height:min(42svh, max(110px, calc((100svh - 450px) * .45)))}
+  .viewfinder.hunt{width:min(100%, calc(4 / 3 * min(62svh, max(150px, calc((100svh - 450px) * .55)))))}
+}
+.viewfinder .meter{position:absolute; left:0; right:0; bottom:0; padding:22px 10px 6px; pointer-events:none;
+  background:linear-gradient(transparent, rgba(0,0,0,.6))}
+.viewfinder .meter .meter-track{height:16px}
+.viewfinder .meter .meter-txt{color:#fff; margin-top:4px; font-size:clamp(15px, 4.4vw, 20px); text-shadow:0 1px 3px rgba(0,0,0,.7)}
 .viewfinder .ghost{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.55; mix-blend-mode:multiply; pointer-events:none}
 .meter-track{position:relative; height:24px; border-radius:12px; overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.35);
   background:linear-gradient(90deg, #4aa3c7, #9fd3ee 30%, #f4d43c 60%, #e8843a 80%, #c42f28)}
@@ -229,7 +243,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 16;
+const VERSION = 17;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -1035,10 +1049,10 @@ function renderClue(){
     const tail = `<p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>${hint}
       <button class="btn ghost" data-act="approve">Ouders: plek goedkeuren</button>`;
     if (ui.busy) after = `<div class="busy"><span class="glass">🔍</span><p>${esc(ui.busy)}</p></div>`;
-    else if (camOk()) after = `<div class="viewfinder"><video id="vf" class="${cam.facing==="user"?"mirror":""}" playsinline muted autoplay></video>
-        ${ui.ghost ? `<img class="ghost" src="${pic}" alt="">` : ""}<div class="flash" id="flash"></div></div>
-      <div><div class="meter-track" role="img" aria-label="Warm of koud"><span id="meterCover" style="width:${100-hunt.warm*100}%"></span></div>
-        <p class="meter-txt" id="meterTxt" aria-live="polite">${BANDS[hunt.band].t}</p></div>
+    else if (camOk()) after = `<div class="viewfinder hunt"><video id="vf" class="${cam.facing==="user"?"mirror":""}" playsinline muted autoplay></video>
+        ${ui.ghost ? `<img class="ghost" src="${pic}" alt="">` : ""}<div class="flash" id="flash"></div>
+        <div class="meter"><div class="meter-track" role="img" aria-label="Warm of koud"><span id="meterCover" style="width:${100-hunt.warm*100}%"></span></div>
+          <p class="meter-txt" id="meterTxt" aria-live="polite">${BANDS[hunt.band].t}</p></div></div>
       <button class="btn" data-act="huntSnap">📸 Is het hier?</button>
       <div class="row"><button class="btn alt small" data-act="flip">🔄 Andere camera</button>
         ${(sub.tries||0) >= 2 ? `<button class="btn alt small" data-act="ghost">👻 ${ui.ghost ? "Spiekplaatje weg" : "Spiekplaatje"}</button>` : ""}</div>` + tail;
@@ -1073,7 +1087,7 @@ function renderClue(){
 
   return folder(`${(prog.team||"DETECTIVES").toUpperCase()} · STAP ${i+1}/${n}`, `
     <div class="progress" aria-label="Stap ${i+1} van ${n}">${dots}</div>
-    <div class="paper"><span class="tape"></span>
+    <div class="paper ${k==="match" ? "hunt" : ""}"><span class="tape"></span>
       <p class="type muted" style="margin-bottom:8px">${label} ${i+1}</p>
       ${text ? `<p class="riddle">${esc(text)}</p>` : ""}
       ${extra}
