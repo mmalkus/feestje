@@ -60,6 +60,11 @@ Each step in the setup has a type:
   - In the setup, the app rates how recognisable the spot is, and "🧪 Probeer uit" lets you take a test photo to see the score
     (and the AI's answer). Plain walls and doors are hard to recognise; pick spots with things and patterns.
   - Found spots end up in the photo album on the final screen.
+  - **Verrassing** (optional, needs the image key from "Detective-foto's met AI"): write what the AI should add to your photo
+    (e.g. "modderige voetstappen die om de hoek verdwijnen") and tap "✨ Maak verrassingsfoto". The edited photo is made in the setup
+    and stored on the device, so no internet is needed while playing. The kids see it only once they've found the spot, on the
+    "PLEK GEVONDEN!" screen. A new photo of the spot drops the old surprise. Mistral draws a new picture instead of editing the photo.
+    Also works for a Kompastocht step that has a photo.
 
 - **Kompastocht (GPS)**: the kids walk to a point outdoors. An on-screen compass arrow points at it, with the distance
   ("Nog 120 meter"), 🔥 Warmer / ❄️ Kouder, and a warm/cold bar. Put several of these steps in a row to make a trail.
