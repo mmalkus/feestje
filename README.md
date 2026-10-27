@@ -61,6 +61,17 @@ Each step in the setup has a type:
     (and the AI's answer). Plain walls and doors are hard to recognise; pick spots with things and patterns.
   - Found spots end up in the photo album on the final screen.
 
+- **Kompastocht (GPS)**: the kids walk to a point outdoors. An on-screen compass arrow points at it, with the distance
+  ("Nog 120 meter"), 🔥 Warmer / ❄️ Kouder, and a warm/cold bar. Put several of these steps in a row to make a trail.
+  - In the setup, tap the map (OpenStreetMap) to place the point, tap "📍 Ik sta er nu" while standing there, or paste
+    coordinates or a Google Maps link. The map shows the whole trail and the distance from the previous point.
+    "Gevonden binnen" (10–50 m) sets how close counts as there; 20 m works well for phone GPS.
+  - Optional photo: once they're there, the step continues as **Zoek deze plek** (drawing, warmer/colder camera, photo check).
+  - The arrow follows the phone's compass (iPhone asks for permission when they tap "🧭 Op pad!"). Without a compass it
+    uses the walking direction from the GPS. "Ouders: we zijn er" (sum or PIN) always lets a parent pass the point.
+  - Needs location permission and HTTPS (GitHub Pages / Netlify are fine). The game works offline outdoors; only the map in
+    the setup needs internet.
+
 ## Voorlezen (text-to-speech)
 Ouders → Instellingen → "Voorlezen": a voice reads the story, riddles, tips, evidence and the ending aloud. Every line is spoken
 **before the game starts** and stored in IndexedDB, so no internet is needed while playing. "🎙 Alles nu inspreken"
@@ -82,4 +93,5 @@ pip install -r tests/requirements.txt && python -m playwright install chromium
 pytest tests
 ```
 `test_static.py` checks that `VERSION` in index.html matches the cache name in sw.js, that the manifest and precached files exist, and that the scripts parse.
+`test_gps.py` walks a compass trail with a simulated GPS and sets a point in the parents' menu.
 `test_smoke.py` opens the game in Chromium at phone size: start screen, starting the hunt, the parent gate (wrong and right answer) and offline reload via the service worker.

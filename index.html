@@ -189,6 +189,19 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 .meter-txt{text-align:center; font:400 clamp(17px, 5vw, 22px)/1.2 var(--f-display); margin-top:8px}
 .btn.pulse{animation:pulse .8s ease-in-out infinite}
 @keyframes pulse{50%{transform:scale(1.05)}}
+/* "Kompastocht": the rose turns with the phone so N points north; the red arrow points at the spot */
+.compass{position:relative; width:min(68vw, 34vh, 280px); aspect-ratio:1; margin:12px auto 0}
+@supports (height:100svh){ .compass{width:min(68vw, 34svh, 280px)} }
+.compass .rose{position:absolute; inset:0; border-radius:50%; box-sizing:border-box; border:6px solid var(--ink); transition:transform .25s linear;
+  background:repeating-conic-gradient(from -1deg, var(--ink-soft) 0 2deg, transparent 2deg 30deg), radial-gradient(circle, var(--paper) 0 80%, var(--folder) 80%)}
+.compass .rose span{position:absolute; font:400 clamp(18px, 6vw, 26px)/1 var(--f-display); color:var(--ink); transform:translate(-50%,-50%)}
+.compass .rose .n{left:50%; top:13%; color:var(--stamp)} .compass .rose .s{left:50%; top:87%}
+.compass .rose .e{left:87%; top:50%} .compass .rose .w{left:13%; top:50%}
+.compass .needle{position:absolute; inset:14%; width:72%; height:72%; transition:transform .25s linear; filter:drop-shadow(0 3px 3px rgba(0,0,0,.35))}
+.compass .needle path{fill:var(--stamp); stroke:var(--ink); stroke-width:2; stroke-linejoin:round}
+.compass .needle circle{fill:var(--ink)}
+.map{height:260px; border-radius:6px; margin-top:6px; background:var(--line); z-index:0}
+.map.off{display:flex; align-items:center; justify-content:center; text-align:center; padding:16px; height:auto; font-size:15px}
 .ailog{white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.4 ui-monospace, Menlo, monospace; margin:6px 0 0; color:var(--ink)}
 .check{display:flex; gap:10px; align-items:center; font-size:16px}
 .check input{width:24px; height:24px}
@@ -204,14 +217,18 @@ label.btn{display:flex; align-items:center; justify-content:center; text-align:c
 (function(){
 /* Step types: code = riddle + note with code; photo = "waar is dit?" zoomed photo + note; jigsaw = swap-tile photo puzzle + note;
    scramble = letter puzzle on the tablet; camera = photo assignment, optionally turned into a detective picture;
-   match = see a drawing of a spot, find it and photograph it (checked on the device, with an optional AI second opinion). */
-const TYPES = { code:"Raadsel + briefje", photo:"Waar is dit? (foto)", jigsaw:"Fotopuzzel", scramble:"Letterpuzzel", camera:"Foto-opdracht", match:"Zoek deze plek (foto-match)" };
+   match = see a drawing of a spot, find it and photograph it (checked on the device, with an optional AI second opinion);
+   gps = walk to a point on the map with an on-screen compass; with a photo, they then find that spot as in "match".
+   Several gps steps in a row make a trail. */
+const TYPES = { code:"Raadsel + briefje", photo:"Waar is dit? (foto)", jigsaw:"Fotopuzzel", scramble:"Letterpuzzel", camera:"Foto-opdracht", match:"Zoek deze plek (foto-match)", gps:"Kompastocht (GPS)" };
 // pass = corners that must agree between the parent's photo and the kids' photo (unrelated photos reach about 5–11)
 const MATCH_LEVELS = { easy:{ name:"Makkelijk (kleine kinderen)", pass:12 }, normal:{ name:"Normaal", pass:18 }, strict:{ name:"Streng (precies dezelfde foto)", pass:30 } };
 const passFor = s => (MATCH_LEVELS[s.level] || MATCH_LEVELS.normal).pass;
 const JIG_SIZES = ["3x3","3x4","4x4","4x5","5x5"]; // photo puzzle: columns x rows
 const jigSize = s => { const [c, r] = (JIG_SIZES.includes(s.grid) ? s.grid : JIG_SIZES[0]).split("x").map(Number); return { c, r }; };
 const NOTE_TYPES = ["code","photo","jigsaw"];
+const GPS_RADII = [10, 20, 30, 50]; // metres: how close to the point counts as "there"
+const radiusFor = s => GPS_RADII.includes(+s.radius) ? +s.radius : 20;
 
 const DEFAULT = {
   title: "De Verdwenen Verjaardagstaart",
@@ -263,7 +280,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 19;
+const VERSION = 20;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -532,7 +549,9 @@ const clips = new Map(), buffers = new Map(); // key -> mp3 blob / decoded Audio
 const JIG_DONE = "Gelukt! Nu weten jullie waar het briefje ligt. Snel, ga kijken!";
 const clueText = (s, k) => s.clue || { photo:"Waar is dit? Zoek de plek van de foto. Daar ligt een briefje met een geheime code!",
   jigsaw:"De foto is in stukjes gevallen! Sleep een stukje naar een ander stukje (of tik op twee stukjes) om ze te wisselen. Als de foto klopt, weten jullie waar het briefje ligt.",
-  match:"Waar is deze plek? Zoek hem en maak er een foto van, vanaf dezelfde kant als de tekening. De meter zegt of jullie warm of koud zijn!" }[k] || "";
+  match:"Waar is deze plek? Zoek hem en maak er een foto van, vanaf dezelfde kant als de tekening. De meter zegt of jullie warm of koud zijn!",
+  gps:"Volg het kompas! De pijl wijst naar de geheime plek. Hoe dichterbij, hoe warmer." }[k] || "";
+const GPS_THERE = "Jullie zijn er! Zoek nu de plek van de tekening en maak er een foto van, vanaf dezelfde kant.";
 const MSG = { wrongCode:"Die code klopt niet. Kijk nog eens goed op het briefje!", wrongSuspect:"Nee hoor! Kijk nog eens goed naar de bewijsstukken." };
 const speakable = t => String(t||"").replace(/[\p{Extended_Pictographic}️‍]/gu, "").replace(/\s*\n\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 // slot -> text. The final line holds the team name, so it is spoken when the kids tap Start.
@@ -545,6 +564,7 @@ function speechLines(team){
     if (s.hint && k!=="camera") L[`hint${i}`] = `Tip: ${s.hint}`;
     if (s.evidence) L[`ev${i}`] = `Goed zo! Bewijsstuk ${i+1}. ${s.evidence}`;
     if (k==="jigsaw") L[`jig${i}`] = JIG_DONE;
+    if (k==="gps" && s.photo) L[`there${i}`] = GPS_THERE;
   });
   for (const k in L){ L[k] = speakable(L[k]); if (!L[k]) delete L[k]; }
   return L;
@@ -622,7 +642,8 @@ function say(slot, delay){
 function autoSlot(){
   if (ui.view) return "";
   if (ui.overlay) return ui.overlaySlot ?? undefined;
-  if (prog.phase==="clue"){ const s = cfg.steps[prog.index]; return kind(s)==="jigsaw" && prog.sub.solved ? `jig${prog.index}` : `clue${prog.index}`; }
+  if (prog.phase==="clue"){ const s = cfg.steps[prog.index];
+    return kind(s)==="jigsaw" && prog.sub.solved ? `jig${prog.index}` : kind(s)==="gps" && prog.sub.there ? `there${prog.index}` : `clue${prog.index}`; }
   return { accuse:"accuse", solved:"final" }[prog.phase] || "";
 }
 const sayBtn = (slot, label="🔊 Nog een keer") => hasClip(slot) ? `<button class="btn ghost small say" data-act="say" data-slot="${slot}">${label}</button>` : "";
@@ -888,7 +909,7 @@ function huntLoop(){
   if (hunt.running) return; hunt.running = true;
   (async function go(){
     const v = document.getElementById("vf"), s = cfg.steps[prog.index];
-    if (!v || prog.phase!=="clue" || !s || kind(s)!=="match"){ hunt.running = false; return; }
+    if (!v || prog.phase!=="clue" || !s || kindNow()!=="match"){ hunt.running = false; return; }
     if (v.videoWidth && !ui.overlay && !ui.busy && !cam.busy && document.visibilityState==="visible"){
       try{ showWarmth(warmth(Match.match(await refFeat(s.photo), Match.features(v, 320)), s)); }catch(e){ console.warn(e); }
     }
@@ -941,6 +962,171 @@ function approveOverlay(msg=""){
   render(); document.getElementById("approve")?.focus();
 }
 
+/* ---------- "Kompastocht": walk to a GPS point; an arrow on screen points the way ---------- */
+// "52.090737, 5.121420", "52.09 5.12", a Google Maps link with "@52.09,5.12,17z" or Dutch decimals "52,0907; 5,1214"
+function gpsOf(s){
+  const t = String(s.pos||"");
+  const m = t.match(/(-?\d{1,3}\.\d+)\s*[,; ]\s*(-?\d{1,3}\.\d+)/) || t.match(/^\s*(-?\d{1,3}),(\d+)\s*[; ]\s*(-?\d{1,3}),(\d+)\s*$/);
+  if (!m) return null;
+  const [lat, lng] = m.length > 3 ? [+`${m[1]}.${m[2]}`, +`${m[3]}.${m[4]}`] : [+m[1], +m[2]];
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+const fmtPos = p => `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`;
+const fmtDist = d => d < 1000 ? `${Math.round(d)} meter` : `${(d/1000).toFixed(1).replace(".", ",")} km`;
+function distBearing(a, b){ // metres and compass degrees (0 = north, 90 = east) from a to b
+  const r = Math.PI/180, f1 = a.lat*r, f2 = b.lat*r, dl = (b.lng-a.lng)*r;
+  const h = Math.sin((f2-f1)/2)**2 + Math.cos(f1)*Math.cos(f2)*Math.sin(dl/2)**2;
+  const y = Math.sin(dl)*Math.cos(f2), x = Math.cos(f1)*Math.sin(f2) - Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
+  return { d: 12742000*Math.asin(Math.sqrt(h)), brg: (Math.atan2(y, x)/r + 360) % 360 };
+}
+// heading: where the top of the phone points (compass, or else the walking direction from the GPS)
+const nav = { watch:null, step:-1, pos:null, acc:null, heading:null, course:null, compass:false, absEvents:false, start:null, ref:null, trend:"", err:"", rose:0, needle:0 };
+const turnNeedsAsk = () => typeof DeviceOrientationEvent!=="undefined" && typeof DeviceOrientationEvent.requestPermission==="function"; // iOS: only from a tap
+const nearAngle = (from, to) => from + ((to - from) % 360 + 540) % 360 - 180; // the same angle as `to`, without spinning the long way round
+function onTurn(e){
+  let h = null;
+  if (e.webkitCompassHeading != null) h = e.webkitCompassHeading; // iOS
+  else if (e.type==="deviceorientationabsolute"){ nav.absEvents = true; if (e.alpha != null) h = 360 - e.alpha; } // Android Chrome
+  else if (e.absolute && e.alpha != null && !nav.absEvents) h = 360 - e.alpha;
+  if (h == null || isNaN(h)) return;
+  h = (h + (screen.orientation?.angle ?? window.orientation ?? 0) + 360) % 360;
+  nav.heading = nav.heading == null ? h : (nearAngle(nav.heading, h)*.3 + nav.heading*.7 + 360) % 360; // calm the needle a little
+  if (!nav.compass){ nav.compass = true; document.getElementById("compassBtn")?.remove(); }
+  drawNav();
+}
+function navStart(){
+  if (nav.watch != null) return;
+  if (nav.step !== prog.index) Object.assign(nav, { step:prog.index, start:null, ref:null, trend:"" });
+  nav.err = "";
+  addEventListener("deviceorientationabsolute", onTurn); addEventListener("deviceorientation", onTurn);
+  if (!navigator.geolocation){ nav.err = "Dit apparaat kan zijn plek niet bepalen."; nav.watch = -1; return drawNav(); }
+  nav.watch = navigator.geolocation.watchPosition(onPos, err=>{
+    if (err.code===1) navStop(); // refused: "Opnieuw" asks again
+    nav.err = err.code===1 ? "De app mag niet weten waar jullie zijn. Zet locatie aan voor deze app (en de browser)."
+      : "Geen GPS… loop even naar buiten, weg van hoge gebouwen.";
+    drawNav();
+  }, { enableHighAccuracy:true, maximumAge:1000, timeout:20000 });
+}
+function navStop(){
+  if (nav.watch == null) return;
+  if (nav.watch >= 0) navigator.geolocation.clearWatch(nav.watch);
+  nav.watch = null; nav.compass = false; nav.heading = null; nav.course = null;
+  removeEventListener("deviceorientationabsolute", onTurn); removeEventListener("deviceorientation", onTurn);
+}
+// Called after every render: the compass watches the GPS only while it is on screen.
+function navAttach(){ if (!document.getElementById("compass")) return navStop(); navStart(); drawNav(); }
+function onPos(p){
+  const c = p.coords, s = cfg.steps[prog.index], to = s && gpsOf(s);
+  nav.pos = { lat:c.latitude, lng:c.longitude }; nav.acc = c.accuracy; nav.err = "";
+  if (c.heading != null && !isNaN(c.heading) && c.speed > .6) nav.course = c.heading;
+  if (!to || prog.phase!=="clue" || kind(s)!=="gps") return;
+  const { d } = distBearing(nav.pos, to);
+  if (c.accuracy <= 60){ // ignore rough first fixes for warmer/colder and arriving
+    if (nav.start == null) nav.start = Math.max(d, 30);
+    if (nav.ref == null) nav.ref = d;
+    else if (d < nav.ref - 4){ nav.ref = d; nav.trend = "🔥 Warmer!"; tick(true); }
+    else if (d > nav.ref + 6){ nav.ref = d; nav.trend = "❄️ Kouder…"; tick(false); }
+    if (d <= radiusFor(s) && !ui.overlay) return gpsThere();
+  }
+  drawNav();
+}
+// The point is reached: with a photo the kids now look for the spot itself, otherwise the step is done.
+function gpsThere(){
+  navStop(); ui.msg = "";
+  const s = cfg.steps[prog.index];
+  if (!imgs.has(s.photo)) return solveStep();
+  beep(true); confetti(); prog.sub = { there:true }; saveProg(); render(); scrollTo(0,0);
+}
+function compassHtml(){
+  return `<div class="compass" id="compass" role="img" aria-label="Kompas: de pijl wijst naar de plek">
+      <div class="rose" id="rose" style="transform:rotate(${nav.rose}deg)"><span class="n">N</span><span class="e">O</span><span class="s">Z</span><span class="w">W</span></div>
+      <svg class="needle" id="needle" viewBox="0 0 100 100" style="transform:rotate(${nav.needle}deg)" aria-hidden="true"><path d="M50 6 L70 62 L50 50 L30 62 Z"/><circle cx="50" cy="50" r="6"/></svg>
+    </div>
+    <div class="meter-track" role="img" aria-label="Warm of koud" style="margin-top:14px"><span id="gpsCover" style="width:100%"></span></div>
+    <p class="meter-txt" id="gpsDist" aria-live="polite">📡 GPS zoekt…</p>
+    <p class="muted" id="gpsNote" style="text-align:center;font-size:15px;margin-top:4px"></p>`;
+}
+function drawNav(){
+  const dist = document.getElementById("gpsDist"), note = document.getElementById("gpsNote"), s = cfg.steps[prog.index], to = s && gpsOf(s);
+  if (!dist || !to) return;
+  const heading = nav.compass ? nav.heading : nav.course;
+  if (nav.err){ dist.textContent = "📡 Geen plek…"; note.innerHTML = `${esc(nav.err)} <button class="btn alt small" data-act="gpsGo">🔄 Opnieuw</button>`; return; }
+  if (!nav.pos){ dist.textContent = "📡 GPS zoekt…"; note.textContent = ""; return; }
+  const { d, brg } = distBearing(nav.pos, to);
+  // with a heading the rose turns so N points north and the arrow points at the spot; without one the arrow shows the map direction
+  nav.rose = nearAngle(nav.rose, -(heading ?? 0)); nav.needle = nearAngle(nav.needle, brg - (heading ?? 0));
+  document.getElementById("rose").style.transform = `rotate(${nav.rose}deg)`;
+  document.getElementById("needle").style.transform = `rotate(${nav.needle}deg)`;
+  dist.textContent = `${nav.trend ? nav.trend + " · " : ""}Nog ${fmtDist(d)}`;
+  const warm = nav.start ? clamp01(1 - (d - radiusFor(s)) / Math.max(1, nav.start - radiusFor(s))) : 0;
+  document.getElementById("gpsCover").style.width = `${100 - warm*100}%`;
+  note.textContent = nav.acc > 60 ? `De GPS is nog niet precies (±${Math.round(nav.acc)} m). Even geduld, of ga naar buiten.`
+    : heading == null ? "Geen kompas: loop een stukje, dan weet de pijl welke kant jullie op gaan." : "";
+}
+
+/* ---------- the map in the parents' menu (Leaflet + OpenStreetMap, loaded only when a compass step is open) ---------- */
+function gpsInfo(i){
+  const p = gpsOf(cfg.steps[i]);
+  if (!p) return "";
+  for (let j = i-1; j >= 0; j--){ const q = cfg.steps[j].type==="gps" && gpsOf(cfg.steps[j]); if (q) return `${fmtDist(distBearing(q, p).d)} lopen vanaf stap ${j+1}`; }
+  return "Eerste punt van de kompastocht";
+}
+let leaflet = null;
+function loadLeaflet(){
+  if (window.L?.map) return Promise.resolve(window.L);
+  return leaflet || (leaflet = new Promise((ok, bad)=>{
+    const css = Object.assign(document.createElement("link"), { rel:"stylesheet", href:"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+      integrity:"sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=", crossOrigin:"" });
+    const js = Object.assign(document.createElement("script"), { src:"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+      integrity:"sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=", crossOrigin:"" });
+    js.onload = () => ok(window.L);
+    js.onerror = () => { leaflet = null; css.remove(); js.remove(); bad(new Error("De kaart kon niet laden")); };
+    document.head.append(css, js);
+  }));
+}
+const maps = new Map(); // step index -> { map, el, i, line, dots }
+// Called after every render (and when a step folds open): a map for every visible compass step.
+function mapsAttach(){
+  for (const [i, m] of maps) if (!m.el.isConnected){ try{ m.map.remove(); }catch(e){} maps.delete(i); }
+  const els = [...document.querySelectorAll("[data-map]")].filter(el=>el.offsetParent && !maps.has(+el.dataset.map));
+  if (!els.length) return;
+  loadLeaflet().then(L=>els.forEach(el=>{ if (el.isConnected && !maps.has(+el.dataset.map)) makeMap(L, el); }))
+    .catch(()=>els.forEach(el=>{ el.classList.add("off"); el.textContent = "De kaart laadt niet (geen internet?). Tik op “Ik sta er nu” of plak coördinaten."; }));
+}
+function makeMap(L, el){
+  const i = +el.dataset.map, map = L.map(el);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
+  const m = { map, el, i, line: L.polyline([], { color:"#1f4047", weight:3, dashArray:"6 8" }).addTo(map), dots: L.layerGroup().addTo(map) };
+  maps.set(i, m);
+  map.on("click", e=>{ const inp = document.getElementById(`pos-${i}`); if (!inp) return;
+    inp.value = cfg.steps[i].pos = fmtPos(e.latlng); gpsChanged(i, false); });
+  drawMap(m);
+  // start at this point, else at the nearest earlier point of the trail, else where the parent is now
+  const near = [...cfg.steps.slice(0, i+1).reverse(), ...cfg.steps.slice(i+1)].map(s=>s.type==="gps" && gpsOf(s)).find(Boolean);
+  if (near) return map.setView([near.lat, near.lng], 17);
+  map.setView([52.2, 5.3], 7);
+  navigator.geolocation?.getCurrentPosition(p=>{ if (!gpsOf(cfg.steps[i]) && el.isConnected) map.setView([p.coords.latitude, p.coords.longitude], 17); }, ()=>{}, { maximumAge:60000, timeout:15000 });
+}
+// the whole trail as a dashed line; this step's point in red with a ring for "close enough"
+function drawMap(m){
+  const L = window.L, pts = cfg.steps.map((s,j)=>s.type==="gps" && gpsOf(s) ? { j, p:gpsOf(s) } : null).filter(Boolean);
+  m.line.setLatLngs(pts.map(({ p })=>[p.lat, p.lng]));
+  m.dots.clearLayers();
+  for (const { j, p } of pts){
+    if (j===m.i){
+      L.circle([p.lat, p.lng], { radius:radiusFor(cfg.steps[j]), color:"#c42f28", weight:2, fillOpacity:.15, interactive:false }).addTo(m.dots);
+      L.circleMarker([p.lat, p.lng], { radius:8, color:"#fff", weight:3, fillColor:"#c42f28", fillOpacity:1, interactive:false }).addTo(m.dots);
+    } else L.circleMarker([p.lat, p.lng], { radius:6, color:"#1f4047", weight:2, fillColor:"#e9d29c", fillOpacity:1, interactive:false })
+      .bindTooltip(`${j+1}`, { permanent:true, direction:"top", offset:[0,-6] }).addTo(m.dots);
+  }
+}
+function gpsChanged(i, pan){
+  cfg.steps.forEach((_,j)=>{ const el = document.getElementById(`gpsInfo-${j}`); if (el) el.textContent = gpsInfo(j); });
+  for (const m of maps.values()) drawMap(m);
+  const p = gpsOf(cfg.steps[i]), m = maps.get(i);
+  if (pan && p && m) m.map.setView([p.lat, p.lng], Math.max(m.map.getZoom(), 17));
+}
+
 /* ---------- confetti ---------- */
 function confetti(){
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -983,6 +1169,8 @@ function folder(tab, inner){
 
 // Photo steps without a photo on this device (e.g. after importing settings) fall back to a plain riddle + code.
 const kind = s => { const t = s.type||"code"; return (t==="photo"||t==="jigsaw") && !imgs.has(s.photo) ? "code" : t; };
+// The current step as it is played now: a compass step whose point is reached goes on as a "Zoek deze plek" photo hunt.
+const kindNow = () => { const k = kind(cfg.steps[prog.index]||{}); return k==="gps" && prog.sub.there ? "match" : k; };
 const ZOOMS = [3.2, 2.2, 1.5, 1];
 
 function evidenceList(upto){
@@ -1023,9 +1211,9 @@ const codeForm = () => `
   </form>`;
 
 function renderClue(){
-  const i = prog.index, s = cfg.steps[i], n = cfg.steps.length, k = kind(s), sub = prog.sub;
+  const i = prog.index, s = cfg.steps[i], n = cfg.steps.length, k = kindNow(), sub = prog.sub;
   const dots = cfg.steps.map((_,j)=>`<span class="dot ${j<i?"done":j===i?"now":""}"></span>`).join("");
-  const label = { code:"AANWIJZING", photo:"WAAR IS DIT?", jigsaw:"FOTOPUZZEL", scramble:"LETTERPUZZEL", camera:"FOTO-OPDRACHT", match:"FOTOJACHT" }[k];
+  const label = { code:"AANWIJZING", photo:"WAAR IS DIT?", jigsaw:"FOTOPUZZEL", scramble:"LETTERPUZZEL", camera:"FOTO-OPDRACHT", match:"FOTOJACHT", gps:"KOMPASTOCHT" }[k];
   let text = clueText(s, k), slot = `clue${i}`;
   // selfies for photo assignments, the back camera for finding a spot (once per step, so "Andere camera" sticks)
   if ((k==="camera" || k==="match") && ui.camStep!==i){ ui.camStep = i; const want = k==="match" ? "environment" : "user";
@@ -1061,11 +1249,22 @@ function renderClue(){
       <button class="btn alt small" data-act="unletter" ${picked.length?"":"disabled"}>⌫ Letter terug</button>
       <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>` + hint;
   }
+  if (k==="gps"){
+    if (!gpsOf(s)){ text = `${text}\n\n(Deze plek staat nog niet op de kaart.)`; after = `<button class="btn" data-act="skipStep">Sla deze opdracht over</button>`; }
+    else if (!sub.walk) after = `<button class="btn" data-act="gpsGo">🧭 Op pad!</button>` + hint;
+    else {
+      extra = compassHtml();
+      after = `${turnNeedsAsk() && !nav.compass ? `<button class="btn alt small" id="compassBtn" data-act="gpsGo">🧭 Kompas aanzetten</button>` : ""}
+        <p class="msg bad" aria-live="polite">${esc(ui.msg)}</p>${hint}
+        <button class="btn ghost" data-act="approve">Ouders: we zijn er</button>`;
+    }
+  }
   if (k==="match" && !imgs.has(s.photo)){ // e.g. settings copied from another device without the photo
     text = `${text}\n\n(De foto van deze plek staat niet op dit apparaat.)`;
     after = `<button class="btn" data-act="skipStep">Sla deze opdracht over</button>`;
   }
   else if (k==="match" && !sub.go){ // first the question on its own, then the drawing and the camera together
+    if (sub.there){ text = GPS_THERE; slot = `there${i}`; }
     after = `<button class="btn" data-act="huntGo">🔍 Zoeken maar!</button>`;
   }
   else if (k==="match"){
@@ -1193,10 +1392,10 @@ function lockEditor(){
 function stepEditor(s, i){
   const t = s.type||"code", note = NOTE_TYPES.includes(t), hasPhoto = imgs.has(s.photo);
   const clueLbl = { code:"Raadsel voor de kinderen", photo:"Tekst bij de foto (mag leeg)", jigsaw:"Tekst bij de puzzel (mag leeg)",
-    scramble:"Uitleg bij de puzzel", camera:"Opdracht: wat moeten ze fotograferen?", match:"Tekst bij de tekening (mag leeg)" }[t];
+    scramble:"Uitleg bij de puzzel", camera:"Opdracht: wat moeten ze fotograferen?", match:"Tekst bij de tekening (mag leeg)", gps:"Tekst bij het kompas (mag leeg)" }[t];
   const photoLbl = t==="photo" ? "Foto van de verstopplek (de kinderen zien eerst een ingezoomd stukje uit het midden)"
     : `Foto van de verstopplek (wordt in ${jigSize(s).c*jigSize(s).r} stukjes gehusseld)`;
-  const open = openSteps.has(s), problem = stepProblem(s), summary = s.place || s.code || String(s.clue||"").split("\n")[0];
+  const open = openSteps.has(s), problem = stepProblem(s), summary = (t==="gps" && gpsInfo(i)) || s.place || s.code || String(s.clue||"").split("\n")[0];
   return `
     <div class="step-edit stack${open?"":" closed"}" style="gap:10px" data-i="${i}">
       <div class="step-head">
@@ -1217,20 +1416,31 @@ function stepEditor(s, i){
         </div></div>` : ""}
       ${t==="jigsaw" ? `<div><label class="lbl" for="grid-${i}">Aantal puzzelstukjes</label>
         <select id="grid-${i}" data-f="grid">${JIG_SIZES.map(g=>{ const [c, r] = g.split("x"); return `<option value="${g}" ${g===(JIG_SIZES.includes(s.grid) ? s.grid : JIG_SIZES[0])?"selected":""}>${c} × ${r} (${c*r} stukjes)</option>`; }).join("")}</select></div>` : ""}
-      ${t==="match" ? `<div><span class="lbl">Foto van de plek. Maak hem op ooghoogte van de kinderen; zij zien er een tekening van.</span>
+      ${t==="gps" ? `<div><label class="lbl" for="pos-${i}">Waar moeten ze naartoe? Tik op de kaart, of plak coördinaten (bijv. uit Google Maps)</label>
+        <div class="map" data-map="${i}"></div>
+        <input type="text" id="pos-${i}" data-f="pos" spellcheck="false" placeholder="52.090737, 5.121420" value="${esc(s.pos)}">
+        <p class="muted" id="gpsInfo-${i}" style="font-size:15px;margin-top:6px">${esc(gpsInfo(i))}</p>
+        <div class="row" style="margin-top:8px">
+          <button class="btn alt small" data-act="gpsHere" data-i="${i}">📍 Ik sta er nu</button>
+          <div><label class="lbl" for="radius-${i}">Gevonden binnen</label>
+            <select id="radius-${i}" data-f="radius">${GPS_RADII.map(r=>`<option value="${r}" ${r===radiusFor(s)?"selected":""}>${r} meter</option>`).join("")}</select></div>
+        </div></div>` : ""}
+      ${t==="match" || t==="gps" ? `<div><span class="lbl">${t==="gps" ? "Foto van de plek (mag leeg). Met een foto zoeken ze, als ze er zijn, ook nog deze plek, zoals bij “Zoek deze plek”."
+          : "Foto van de plek. Maak hem op ooghoogte van de kinderen; zij zien er een tekening van."}</span>
         <div class="row" style="align-items:center">
           ${hasPhoto ? `<img class="thumb" src="${imgs.get(imgs.has(s.sketch) ? s.sketch : s.photo)}" alt="">` : `<span class="muted" style="flex:0 0 auto">Nog geen foto</span>`}
           <label class="btn alt small">📷 ${hasPhoto?"Andere foto":"Kies of maak foto"}<input type="file" accept="image/*" capture="environment" class="vh" data-photo="${i}"></label>
+          ${t==="gps" && hasPhoto ? `<button class="btn alt small" data-act="dropPhoto" data-i="${i}">Geen foto</button>` : ""}
         </div>
         ${ui.matchInfo[i] ? `<p class="hint-box" style="font-size:15px;margin-top:8px">${esc(ui.matchInfo[i])}</p>` : ""}</div>
-      <label class="check"><input type="checkbox" data-f="showPhoto" ${s.showPhoto?"checked":""}> Laat de echte foto zien in plaats van een tekening</label>
+      ${t==="match" || hasPhoto ? `<label class="check"><input type="checkbox" data-f="showPhoto" ${s.showPhoto?"checked":""}> Laat de echte foto zien in plaats van een tekening</label>` : ""}
       ${hasPhoto ? `<label class="btn alt small">🧪 Probeer uit: maak een testfoto van de plek<input type="file" accept="image/*" capture="environment" class="vh" data-try="${i}"></label>` : ""}` : ""}
       ${note ? `<div><label class="lbl" for="place-${i}">Verstopplek (alleen voor jou)</label><input type="text" id="place-${i}" data-f="place" value="${esc(s.place)}"></div>` : ""}
       <div><label class="lbl" for="clue-${i}">${clueLbl}</label><textarea id="clue-${i}" data-f="clue">${esc(s.clue)}</textarea></div>
       ${t==="camera" ? `<label class="check"><input type="checkbox" data-f="ai" ${s.ai?"checked":""}> Knop “Maak er detectives van” tonen</label>`
-      : t==="match" ? `<div class="row">
-        <div><label class="lbl" for="level-${i}">Hoe precies moet de foto lijken?</label>
-          <select id="level-${i}" data-f="level">${Object.entries(MATCH_LEVELS).map(([v,l])=>`<option value="${v}" ${v===(s.level||"normal")?"selected":""}>${l.name}</option>`).join("")}</select></div>
+      : t==="match" || t==="gps" ? `<div class="row">
+        ${t==="match" || hasPhoto ? `<div><label class="lbl" for="level-${i}">Hoe precies moet de foto lijken?</label>
+          <select id="level-${i}" data-f="level">${Object.entries(MATCH_LEVELS).map(([v,l])=>`<option value="${v}" ${v===(s.level||"normal")?"selected":""}>${l.name}</option>`).join("")}</select></div>` : ""}
         <div><label class="lbl" for="hint-${i}">Tip</label><input type="text" id="hint-${i}" data-f="hint" value="${esc(s.hint)}"></div>
       </div>` : `
       <div class="row">
@@ -1383,12 +1593,13 @@ function render(){
   if (ui.overlay) html += ui.overlay;
   app.innerHTML = html;
   camAttach();
-  if (document.getElementById("vf") && kind(cfg.steps[prog.index]||{})==="match") huntLoop();
+  if (document.getElementById("vf") && kindNow()==="match") huntLoop();
+  navAttach(); mapsAttach();
   const slot = autoSlot();
   if (slot === undefined) hush();
   else if (slot !== ui.spoken){ ui.spoken = slot; slot ? say(slot) : hush(); }
   const ci = document.getElementById("code");
-  if (ci && !ui.overlay && kind(cfg.steps[prog.index]||{})==="code") ci.focus({preventScroll:true});
+  if (ci && !ui.overlay && kindNow()==="code") ci.focus({preventScroll:true});
 }
 
 function collectSetup(){
@@ -1434,6 +1645,7 @@ function stepProblem(s){
   if (t==="scramble") return norm(s.code).length>=2 ? "" : "mist nog een woord om te puzzelen";
   if ((t==="photo"||t==="jigsaw"||t==="match") && !imgs.has(s.photo)) return "mist nog een foto";
   if (t==="match") return "";
+  if (t==="gps") return gpsOf(s) ? "" : "mist nog een plek op de kaart";
   if (!norm(s.code)) return "mist nog een code";
   return t==="code" && !s.clue ? "mist nog een raadsel" : "";
 }
@@ -1449,7 +1661,7 @@ function newProg(team, phase){
 function solveStep(){
   const s = cfg.steps[prog.index], k = kind(s), last = prog.index===cfg.steps.length-1;
   beep(true); confetti();
-  const stamp = { scramble:"PUZZEL OPGELOST!", camera:"FOTO IN HET DOSSIER!", match:"PLEK GEVONDEN!" }[k] || "CODE GOED!";
+  const stamp = { scramble:"PUZZEL OPGELOST!", camera:"FOTO IN HET DOSSIER!", match:"PLEK GEVONDEN!", gps:"PLEK GEVONDEN!" }[k] || "CODE GOED!";
   ui.overlaySlot = s.evidence ? `ev${prog.index}` : "";
   ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="${stamp}"><div class="paper stack"><span class="tape"></span>
     <span class="stamp" style="color:var(--good);border-color:var(--good)">${stamp}</span>
@@ -1537,6 +1749,9 @@ app.addEventListener("click", async e=>{
       prog = newProg((document.getElementById("team")?.value||prog.team||"").trim(), "start");
       ui.hintShown=false; ui.zoom=0; saveProg(); render(); scrollTo(0,0); break;
     case "huntGo": prog.sub.go = true; saveProg(); render(); scrollTo(0,0); break;
+    case "gpsGo": // iOS only shows the compass after asking, and only from a tap
+      if (turnNeedsAsk()) DeviceOrientationEvent.requestPermission().catch(()=>{});
+      navStop(); prog.sub.walk = true; saveProg(); render(); scrollTo(0,0); break;
     case "huntBack": prog.sub.go = false; saveProg(); render(); scrollTo(0,0); break;
     case "hint": ui.hintShown=true; render(); say(`hint${prog.index}`); break;
     case "say": getAudio(); say(b.dataset.slot); break;
@@ -1653,7 +1868,19 @@ app.addEventListener("click", async e=>{
       open ? openSteps.add(st) : openSteps.delete(st);
       el.classList.toggle("closed", !open); document.getElementById(b.getAttribute("aria-controls")).hidden=!open;
       b.setAttribute("aria-expanded", open); b.querySelector("b").textContent = b.querySelector("b").textContent.replace(/^[▸▾]/, open?"▾":"▸");
+      mapsAttach();
       break; }
+    case "gpsHere": {
+      const inp = document.getElementById(`pos-${i}`), info = document.getElementById(`gpsInfo-${i}`);
+      if (!navigator.geolocation){ info.textContent = "Dit apparaat kan zijn plek niet bepalen."; break; }
+      b.disabled = true; info.textContent = "Plek bepalen…";
+      navigator.geolocation.getCurrentPosition(p=>{
+        b.disabled = false; inp.value = cfg.steps[i].pos = fmtPos({ lat:p.coords.latitude, lng:p.coords.longitude }); gpsChanged(i, true);
+        info.textContent = `${gpsInfo(i)} · GPS ±${Math.round(p.coords.accuracy)} m${p.coords.accuracy > 25 ? ": niet erg precies, wacht even buiten en tik nog eens" : ""}`;
+      }, err=>{ b.disabled = false; info.textContent = err.code===1 ? "Locatie staat uit voor deze app." : "Plek bepalen lukte niet. Probeer het buiten nog eens."; },
+      { enableHighAccuracy:true, timeout:20000, maximumAge:0 });
+      break; }
+    case "dropPhoto": collectSetup(); delete cfg.steps[i].photo; delete cfg.steps[i].sketch; delete ui.matchInfo[i]; render(); break;
     case "openAll": collectSetup(); cfg.steps.forEach(st=>openSteps.add(st)); render(); break;
     case "closeAll": collectSetup(); openSteps=new WeakSet(); render(); break;
     case "add": { collectSetup(); const st={type:"code",clue:"",place:"",code:"",hint:"",evidence:""}; cfg.steps.push(st); openSteps.add(st); render();
@@ -1667,7 +1894,7 @@ app.addEventListener("click", async e=>{
       const bad = cfg.steps.findIndex(s=>stepProblem(s));
       if(bad>=0){ ui.setupTab="steps"; openSteps.add(cfg.steps[bad]); render(); setupMsg(`Stap ${bad+1} ${stepProblem(cfg.steps[bad])}.`);
         document.querySelector(`.step-edit[data-i="${bad}"]`)?.scrollIntoView({block:"center"}); return; }
-      for (const st of cfg.steps) if (st.type==="match" && imgs.has(st.photo) && !imgs.has(st.sketch)){ // e.g. a "Waar is dit?" photo reused
+      for (const st of cfg.steps) if ((st.type==="match" || st.type==="gps") && imgs.has(st.photo) && !imgs.has(st.sketch)){ // e.g. a "Waar is dit?" photo reused
         setupMsg("Tekening wordt gemaakt…"); try{ st.sketch = await sketchOf(st.photo); }catch(err){} }
       save(KEY_CFG,cfg); gcImages();
       if(prog.index>=cfg.steps.length && prog.phase==="clue"){ prog.index=0; prog.sub={}; saveProg(); }
@@ -1694,6 +1921,7 @@ app.addEventListener("change", async e=>{
   const t=e.target;
   if(t.matches('select[data-f="type"], select[data-f="grid"]') || t.id==="ai-style"){ collectSetup(); if(t.id==="ai-style") save(KEY_AI, ai); render(); return; }
   if(t.id==="ai-model"){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); return; }
+  if(t.matches('select[data-f="radius"]')){ const i=+t.closest(".step-edit").dataset.i; cfg.steps[i].radius = +t.value; gpsChanged(i, false); return; }
   if(t.id==="ai-verify"){ collectSetup(); save(KEY_AI, ai); render(); return; }
   if(t.id==="tts-on"){ collectSetup(); save(KEY_TTS, tts); render(); document.getElementById("tts-on")?.scrollIntoView({block:"center"}); return; }
   if(t.id==="tts-voice"){ collectTts(); save(KEY_TTS, tts); ttsMsg(ttsStatus()); return; }
@@ -1712,7 +1940,7 @@ app.addEventListener("change", async e=>{
   }
   if(t.dataset.photo!==undefined && t.files[0]){
     collectSetup(); setupMsg("Foto wordt verwerkt…");
-    const i=+t.dataset.photo, st=cfg.steps[i], match = st.type==="match";
+    const i=+t.dataset.photo, st=cfg.steps[i], match = st.type==="match" || st.type==="gps";
     try{ st.photo = await storeImage(t.files[0], "p-", !match);
       if (match){ setupMsg("Tekening wordt gemaakt…"); st.sketch = await sketchOf(st.photo); ui.matchInfo[i] = qualityText(await spotQuality(st.photo)); }
       ui.msg=""; render(); }
@@ -1764,7 +1992,7 @@ app.addEventListener("submit", e=>{
     const val=document.getElementById("approve").value.trim(), pin = lock.mode==="pin" && lock.hash, m=document.getElementById("approveMsg");
     if(Date.now() < ui.lockUntil){ m.textContent=`Te vaak fout. Wacht ${Math.ceil((ui.lockUntil-Date.now())/1000)} seconden.`; return; }
     const ok = pin ? (await hashPin(val, lock.salt)) === lock.hash : val!=="" && +val === ui.approveQ.a*ui.approveQ.b;
-    if(ok){ ui.fails=0; ui.overlay=null; hunt.warm=0; hunt.band=0; ui.ghost=false; return solveStep(); }
+    if(ok){ ui.fails=0; ui.overlay=null; hunt.warm=0; hunt.band=0; ui.ghost=false; return kindNow()==="gps" ? gpsThere() : solveStep(); }
     if(++ui.fails % 5 === 0) ui.lockUntil = Date.now() + 30000;
     pin ? (m.textContent="Die pincode klopt niet.") : approveOverlay("Dat is niet goed. Hier is een nieuwe som.");
   })();
@@ -1827,6 +2055,7 @@ app.addEventListener("keydown", e=>{ // the handle also moves a step with the ar
 
 app.addEventListener("input", e=>{
   if(e.target.id==="team"){ prog.team=e.target.value; saveProg(); }
+  if(e.target.dataset.f==="pos"){ const i=+e.target.closest(".step-edit").dataset.i; cfg.steps[i].pos = e.target.value.trim(); gpsChanged(i, true); }
   if(/^ai-(key|base|model|prompt|vision)$/.test(e.target.id)){ collectAi(); save(KEY_AI, ai); aiMsg(aiStatus()); }
   if(/^tts-(key|base|model|voice|style)$/.test(e.target.id)){ collectTts(); save(KEY_TTS, tts); ttsMsg(ttsStatus()); }
 });
