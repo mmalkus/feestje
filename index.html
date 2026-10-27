@@ -280,7 +280,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 20;
+const VERSION = 21;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -295,7 +295,7 @@ const aiKey = () => (ai.keys[ai.provider] || "").trim();
 let tts = Object.assign({}, TTS_DEFAULT, load(KEY_TTS, {}));
 const ttsKey = () => (tts.keys[tts.provider] || "").trim();
 let openSteps = new WeakSet(); // steps unfolded in the parents' menu (by object, so it follows a step when the order changes)
-let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0, matchInfo:{} };
+let ui = { hintShown:false, overlay:null, gateQ:null, msg:"", zoom:0, busy:"", recover:false, fails:0, lockUntil:0, matchInfo:{}, revealInfo:{} };
 
 /* ---------- parents' lock: a sum or a PIN; asked every time the menu opens ---------- */
 const KEY_LOCK = "speurtocht.lock.v1";
@@ -353,7 +353,7 @@ async function storeImage(file, prefix, square){
 }
 function dropImage(id){ if(!id) return; DB.del(id).catch(()=>{}); const u=imgs.get(id); if(u) URL.revokeObjectURL(u); imgs.delete(id); }
 function gcImages(){
-  const keep = new Set([...cfg.steps.flatMap(s=>[s.photo, s.sketch]), ...prog.photos.flatMap(p=>[p.id,p.orig]), prog.sub.photo, prog.sub.styled]);
+  const keep = new Set([...cfg.steps.flatMap(s=>[s.photo, s.sketch, s.reveal]), ...prog.photos.flatMap(p=>[p.id,p.orig]), prog.sub.photo, prog.sub.styled]);
   [...imgs.keys()].forEach(k=>{ if(!keep.has(k)) dropImage(k); });
 }
 
@@ -409,13 +409,13 @@ async function fetchModels(){
   return list.filter(m=>m && m.id).map(m=>({ id:m.id, img:isImg(m) }))
     .sort((a,b)=> (b.img-a.img) || a.id.localeCompare(b.id));
 }
-async function aiDetective(id){
+async function aiDetective(id, prompt){
   aiLog = [];
-  try{ return await aiDraw(id); }
+  try{ return await aiDraw(id, prompt); }
   catch(e){ e.log = aiLog.slice(); throw e; }
 }
-async function aiDraw(id){
-  const blob = await (await fetch(imgs.get(id))).blob(), prompt = ai.prompt || AI_DEFAULT.prompt;
+async function aiDraw(id, prompt = ai.prompt || AI_DEFAULT.prompt){
+  const blob = await (await fetch(imgs.get(id))).blob();
   const toImage = async url => (await fetch(url)).blob();
   let out, outUrl;
   if (ai.style === "chat"){
@@ -514,6 +514,9 @@ async function aiDraw(id){
   if (!out) throw new Error("Geen plaatje ontvangen");
   return keepBlob(out, "k-");
 }
+
+// "Zoek deze plek" surprise: the parent's photo with something added (e.g. footprints), shown when the kids find the spot.
+const revealPrompt = what => `Edit this photo: ${what}. Keep everything else exactly as it is: the same place, objects, camera angle and lighting. Photorealistic, so it looks like the same photo with this added. Kid-friendly, no text.`;
 
 /* ---------- sound ---------- */
 let actx;
@@ -1434,7 +1437,8 @@ function stepEditor(s, i){
         </div>
         ${ui.matchInfo[i] ? `<p class="hint-box" style="font-size:15px;margin-top:8px">${esc(ui.matchInfo[i])}</p>` : ""}</div>
       ${t==="match" || hasPhoto ? `<label class="check"><input type="checkbox" data-f="showPhoto" ${s.showPhoto?"checked":""}> Laat de echte foto zien in plaats van een tekening</label>` : ""}
-      ${hasPhoto ? `<label class="btn alt small">🧪 Probeer uit: maak een testfoto van de plek<input type="file" accept="image/*" capture="environment" class="vh" data-try="${i}"></label>` : ""}` : ""}
+      ${hasPhoto ? `<label class="btn alt small">🧪 Probeer uit: maak een testfoto van de plek<input type="file" accept="image/*" capture="environment" class="vh" data-try="${i}"></label>` : ""}
+      ${hasPhoto ? revealEditor(s, i) : ""}` : ""}
       ${note ? `<div><label class="lbl" for="place-${i}">Verstopplek (alleen voor jou)</label><input type="text" id="place-${i}" data-f="place" value="${esc(s.place)}"></div>` : ""}
       <div><label class="lbl" for="clue-${i}">${clueLbl}</label><textarea id="clue-${i}" data-f="clue">${esc(s.clue)}</textarea></div>
       ${t==="camera" ? `<label class="check"><input type="checkbox" data-f="ai" ${s.ai?"checked":""}> Knop “Maak er detectives van” tonen</label>`
@@ -1449,6 +1453,23 @@ function stepEditor(s, i){
       </div>`}
       <div><label class="lbl" for="ev-${i}">Bewijsstuk dat ze hier vinden${t==="camera"?" (mag leeg)":""}</label><textarea id="ev-${i}" data-f="evidence" style="min-height:64px">${esc(s.evidence)}</textarea></div>
     </div></div>`;
+}
+
+// Optional surprise for a found spot: the AI changes the parent's photo now, so the game needs no internet later.
+function revealEditor(s, i){
+  const has = imgs.has(s.reveal), info = ui.revealInfo[i];
+  return `<div><label class="lbl" for="revealWhat-${i}">Verrassing als ze de plek vinden (mag leeg): wat moet de AI aan je foto toevoegen?</label>
+    <input type="text" id="revealWhat-${i}" data-f="revealWhat" placeholder="Bijv. modderige voetstappen die om de hoek verdwijnen" value="${esc(s.revealWhat)}">
+    <div class="row" style="align-items:center;margin-top:8px">
+      ${has ? `<img class="thumb" src="${imgs.get(s.reveal)}" alt="Verrassingsfoto">` : ""}
+      <button class="btn alt small" data-act="makeReveal" data-i="${i}" ${aiReady() && !ui.revealBusy ? "" : "disabled"}>✨ ${has ? "Opnieuw maken" : "Maak verrassingsfoto"}</button>
+      ${has ? `<button class="btn alt small" data-act="dropReveal" data-i="${i}">Geen verrassing</button>` : ""}
+    </div>
+    <p class="muted" style="font-size:15px;margin-top:6px">${!aiReady() ? "Stel eerst een AI-sleutel in onder Instellingen → Detective-foto's met AI."
+      : ai.style==="mistral" ? "Let op: Mistral tekent een nieuw plaatje en bewerkt je foto niet; de plek lijkt dan minder op het echte plekje."
+      : "De foto wordt nu gemaakt en op dit apparaat bewaard; tijdens het spel is er geen internet nodig. De kinderen zien hem pas als ze de plek gevonden hebben."}</p>
+    ${info ? `<div class="hint-box" style="font-size:15px;margin-top:8px">${esc(info.text)}${info.log?.length ? `<details style="margin-top:6px"><summary>Technische details</summary><pre class="ailog">${esc(info.log.join("\n"))}</pre></details>` : ""}</div>` : ""}
+  </div>`;
 }
 
 function ttsEditor(){
@@ -1662,9 +1683,11 @@ function solveStep(){
   const s = cfg.steps[prog.index], k = kind(s), last = prog.index===cfg.steps.length-1;
   beep(true); confetti();
   const stamp = { scramble:"PUZZEL OPGELOST!", camera:"FOTO IN HET DOSSIER!", match:"PLEK GEVONDEN!", gps:"PLEK GEVONDEN!" }[k] || "CODE GOED!";
+  const reveal = (k==="match" || k==="gps") && imgs.has(s.reveal) ? `<img class="full" src="${imgs.get(s.reveal)}" alt="Kijk eens wat er op deze plek gebeurd is!">` : "";
   ui.overlaySlot = s.evidence ? `ev${prog.index}` : "";
   ui.overlay = `<div class="overlay" role="dialog" aria-modal="true" aria-label="${stamp}"><div class="paper stack"><span class="tape"></span>
     <span class="stamp" style="color:var(--good);border-color:var(--good)">${stamp}</span>
+    ${reveal}
     ${s.evidence ? `<p class="type muted">BEWIJSSTUK #${prog.index+1}</p><p class="riddle" style="font-size:20px">${esc(s.evidence)}</p>${sayBtn(`ev${prog.index}`)}` : ""}
     <button class="btn" data-act="next">${last?"Naar de ontknoping":"Volgende opdracht"}</button></div></div>`;
   render(); app.querySelector(".overlay .btn")?.focus();
@@ -1880,7 +1903,15 @@ app.addEventListener("click", async e=>{
       }, err=>{ b.disabled = false; info.textContent = err.code===1 ? "Locatie staat uit voor deze app." : "Plek bepalen lukte niet. Probeer het buiten nog eens."; },
       { enableHighAccuracy:true, timeout:20000, maximumAge:0 });
       break; }
-    case "dropPhoto": collectSetup(); delete cfg.steps[i].photo; delete cfg.steps[i].sketch; delete ui.matchInfo[i]; render(); break;
+    case "dropPhoto": collectSetup(); delete cfg.steps[i].photo; delete cfg.steps[i].sketch; delete cfg.steps[i].reveal; delete ui.matchInfo[i]; delete ui.revealInfo[i]; render(); break;
+    case "makeReveal": {
+      collectSetup(); const st = cfg.steps[i], what = st.revealWhat;
+      if (!what){ ui.revealInfo[i] = { text:"Schrijf eerst wat de AI aan de foto moet toevoegen." }; render(); break; }
+      ui.revealBusy = true; ui.revealInfo[i] = { text:`De AI (${PROVIDERS[ai.provider]?.name || "AI"}) is aan het tekenen… dit duurt ongeveer een minuut.` }; render();
+      try{ const id = await aiDetective(st.photo, revealPrompt(what)); dropImage(st.reveal); st.reveal = id; delete ui.revealInfo[i]; }
+      catch(err){ console.warn(err); ui.revealInfo[i] = { text:`Dat lukte niet: ${err.message || err}`, log:err.log }; }
+      ui.revealBusy = false; render(); setupMsg(ui.revealInfo[i] ? "" : "Verrassingsfoto gemaakt. Tik op Opslaan om hem te bewaren."); break; }
+    case "dropReveal": collectSetup(); delete cfg.steps[i].reveal; delete ui.revealInfo[i]; render(); break;
     case "openAll": collectSetup(); cfg.steps.forEach(st=>openSteps.add(st)); render(); break;
     case "closeAll": collectSetup(); openSteps=new WeakSet(); render(); break;
     case "add": { collectSetup(); const st={type:"code",clue:"",place:"",code:"",hint:"",evidence:""}; cfg.steps.push(st); openSteps.add(st); render();
@@ -1888,7 +1919,7 @@ app.addEventListener("click", async e=>{
     case "del":
       if(cfg.steps.length<2) return setupMsg("Er moet minstens één opdracht overblijven.");
       if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker?"; return; }
-      collectSetup(); cfg.steps.splice(i,1); ui.matchInfo={}; render(); break;
+      collectSetup(); cfg.steps.splice(i,1); ui.matchInfo={}; ui.revealInfo={}; render(); break;
     case "saveSetup": {
       collectSetup(); save(KEY_AI, ai); save(KEY_TTS, tts);
       const bad = cfg.steps.findIndex(s=>stepProblem(s));
@@ -1941,7 +1972,7 @@ app.addEventListener("change", async e=>{
   if(t.dataset.photo!==undefined && t.files[0]){
     collectSetup(); setupMsg("Foto wordt verwerkt…");
     const i=+t.dataset.photo, st=cfg.steps[i], match = st.type==="match" || st.type==="gps";
-    try{ st.photo = await storeImage(t.files[0], "p-", !match);
+    try{ st.photo = await storeImage(t.files[0], "p-", !match); delete st.reveal; delete ui.revealInfo[i]; // made from the old photo
       if (match){ setupMsg("Tekening wordt gemaakt…"); st.sketch = await sketchOf(st.photo); ui.matchInfo[i] = qualityText(await spotQuality(st.photo)); }
       ui.msg=""; render(); }
     catch(err){ console.warn(err); setupMsg("Die foto kon niet geladen worden."); }
@@ -2012,7 +2043,7 @@ app.addEventListener("submit", e=>{
 let stepDrag = null; // { el, grab, y }
 function moveSteps(order){ // order = old indexes in their new order
   collectSetup(); // reads each step by its data-i, so it also works after the boxes were moved around
-  if (!order.every((v,k)=>v===k)){ cfg.steps = order.map(k=>cfg.steps[k]); ui.matchInfo = {}; }
+  if (!order.every((v,k)=>v===k)){ cfg.steps = order.map(k=>cfg.steps[k]); ui.matchInfo = {}; ui.revealInfo = {}; }
   render();
 }
 function dragFrame(){
