@@ -280,7 +280,7 @@ const MISTRAL_AGENT = "You turn photos into illustrations that stay as close as 
 const MISTRAL_ASK = "Stay as close to the attached photo as possible: same people (count, positions, faces, hair, skin tone, clothes and their colours), same poses, same framing and the same background. Only add the detective details on top. Describe all of this in full detail in your image_generation prompt, because the drawing tool cannot see the photo.";
 
 // Shown under Ouders. Raise it with every change, together with the cache name in sw.js (that makes phones update).
-const VERSION = 21;
+const VERSION = 22;
 const KEY_CFG = "speurtocht.config.v1", KEY_PROG = "speurtocht.progress.v1", KEY_AI = "speurtocht.ai.v1", KEY_TTS = "speurtocht.tts.v1";
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
@@ -1588,6 +1588,11 @@ function renderSetup(){
         <button class="btn alt small" data-act="copyJson">Kopieer</button>
         <button class="btn alt small" data-act="importJson">Gebruik geplakte tekst</button>
       </div>
+      <p class="muted" style="font-size:16px">Of bewaar alles als bestand (.json), mét de foto's van de opdrachten. Open het op het andere apparaat met "Open bestand".</p>
+      <div class="row">
+        <button class="btn alt small" data-act="exportFile">💾 Bewaar als bestand</button>
+        <label class="btn alt small">📂 Open bestand<input type="file" accept=".json,application/json" class="vh" id="importFile"></label>
+      </div>
       <div class="row">
         <button class="btn alt small" data-act="resetProg">Spel terug naar begin</button>
         <button class="btn alt small" data-act="resetAll">Voorbeeld herstellen</button>
@@ -1671,6 +1676,24 @@ function stepProblem(s){
   return t==="code" && !s.clue ? "mist nog een raadsel" : "";
 }
 
+// Settings from the copy/paste box or a .json file: either the bare settings or { cfg, images:{ id: data URL } }.
+function useCfg(c){
+  if(!Array.isArray(c?.steps)||!c.steps.length||!Array.isArray(c.suspects)) throw new Error("bad settings");
+  cfg=Object.assign(structuredClone(DEFAULT), c); save(KEY_CFG,cfg);
+}
+async function importFile(file){
+  const j = JSON.parse(await file.text()), images = j?.cfg ? j.images || {} : {};
+  let n = 0;
+  for (const [id, url] of Object.entries(images)){
+    if (typeof url!=="string" || !url.startsWith("data:image/")) continue;
+    const blob = await (await fetch(url)).blob();
+    try{ await DB.put(id, blob); }catch(e){} // private mode: keep it in memory only
+    const old = imgs.get(id); if (old?.startsWith("blob:")) URL.revokeObjectURL(old);
+    imgs.set(id, URL.createObjectURL(blob)); n++;
+  }
+  useCfg(j?.cfg || j); gcImages();
+  return n;
+}
 function setupMsg(t){ ui.msg=t; const m=document.getElementById("setupMsg"); if(m) m.textContent=t; }
 
 function newProg(team, phase){
@@ -1936,11 +1959,22 @@ app.addEventListener("click", async e=>{
         ?? (t.select(), setupMsg("Tekst is geselecteerd: kopieer hem zelf."));
       break; }
     case "importJson":
-      try{ const c=JSON.parse(document.getElementById("s-json").value);
-        if(!Array.isArray(c.steps)||!c.steps.length||!Array.isArray(c.suspects)) throw 0;
-        cfg=Object.assign(structuredClone(DEFAULT), c); save(KEY_CFG,cfg); render(); setupMsg("Instellingen overgenomen. Voeg eventuele foto's opnieuw toe.");
-      }catch(err){ setupMsg("Die tekst klopt niet. Kopieer alles opnieuw vanaf het andere apparaat."); }
+      try{ const c=JSON.parse(document.getElementById("s-json").value); useCfg(c?.cfg || c); render(); setupMsg("Instellingen overgenomen. Voeg eventuele foto's opnieuw toe."); }
+      catch(err){ setupMsg("Die tekst klopt niet. Kopieer alles opnieuw vanaf het andere apparaat."); }
       break;
+    case "exportFile": {
+      collectSetup(); setupMsg("Bestand wordt gemaakt…");
+      const images = {};
+      for (const id of new Set(cfg.steps.flatMap(s=>[s.photo, s.sketch, s.reveal]))){
+        const u = id && imgs.get(id); if(!u) continue;
+        try{ images[id] = u.startsWith("blob:") ? await blobToDataUrl(await (await fetch(u)).blob()) : u; }catch(err){}
+      }
+      const blob = new Blob([JSON.stringify({ app:"speurtocht", format:1, version:VERSION, cfg, images })], { type:"application/json" });
+      const a = document.createElement("a"), name = (cfg.title||"speurtocht").replace(/[^\w\- ]+/g,"").trim().replace(/\s+/g,"-") || "speurtocht";
+      a.href = URL.createObjectURL(blob); a.download = `${name}.json`; document.body.append(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+      setupMsg(`Bestand bewaard${Object.keys(images).length ? ` (met ${Object.keys(images).length} foto's)` : ""}. Druk ook op Opslaan als je iets veranderd hebt.`);
+      break; }
     case "resetProg": prog=newProg("","start"); saveProg(); render(); setupMsg("Spel staat weer aan het begin."); break;
     case "resetAll":
       if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Zeker? Tik nog een keer"; return; }
@@ -1968,6 +2002,12 @@ app.addEventListener("change", async e=>{
     ai.provider = t.value; ai.models = [];
     if (t.value!=="custom"){ ai.base = p.base; ai.style = p.style; ai.model = p.model; ai.visionModel = p.vision; }
     save(KEY_AI, ai); render(); return;
+  }
+  if(t.id==="importFile" && t.files[0]){
+    setupMsg("Bestand wordt geopend…");
+    try{ const n = await importFile(t.files[0]); render(); setupMsg(`Instellingen overgenomen${n ? ` met ${n} foto's` : ""}.`); }
+    catch(err){ console.warn(err); setupMsg("Dat bestand klopt niet. Kies een .json-bestand dat met \"Bewaar als bestand\" is gemaakt."); }
+    t.value=""; return;
   }
   if(t.dataset.photo!==undefined && t.files[0]){
     collectSetup(); setupMsg("Foto wordt verwerkt…");

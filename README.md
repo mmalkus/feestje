@@ -21,7 +21,11 @@ After 5 wrong tries the gate waits 30 seconds.
 
 The screen stays awake while the game is open (Wake Lock API, re-requested whenever the page comes back or is tapped;
 needs iOS 16.4+ / a recent Chrome).
-Settings are stored in localStorage on that device. Use the copy/paste box to move them to another device.
+Settings are stored in localStorage on that device. To move them to another device (Ouders → Instellingen → "Overzetten naar ander apparaat"):
+- **copy/paste box**: the settings as text, without photos;
+- **💾 Bewaar als bestand / 📂 Open bestand**: a `.json` file with the settings *and* the step photos (spot photo, drawing, surprise photo)
+  as data URLs. Unsaved edits in the menu are included. The file format is `{"app":"speurtocht","format":1,"cfg":{…},"images":{id: dataURL}}`;
+  "Open bestand" also accepts the bare settings from the copy/paste box. API keys, spoken lines and the kids' own photos are never in it.
 
 ## Soorten opdrachten
 Each step in the setup has a type:
@@ -89,7 +93,7 @@ Clips are reused as long as the text and the voice settings stay the same. A "�
 - **Anders**: any server with an OpenAI-style `POST /audio/speech` (e.g. a self-hosted voice-cloning server); must allow CORS.
 Keys are stored per service only in that browser's localStorage, like the image key.
 
-Photos are stored in IndexedDB on the device and are not part of the copy/paste export.
+Photos are stored in IndexedDB on the device. They are not part of the copy/paste export, but the step photos are in the `.json` file.
 
 ## Tests
 Run on every pull request to `main` (GitHub Actions, `.github/workflows/tests.yml`). Locally:
@@ -98,5 +102,6 @@ pip install -r tests/requirements.txt && python -m playwright install chromium
 pytest tests
 ```
 `test_static.py` checks that `VERSION` in index.html matches the cache name in sw.js, that the manifest and precached files exist, and that the scripts parse.
+`test_transfer.py` exports a hunt with a photo to a `.json` file and imports it on a fresh device.
 `test_gps.py` walks a compass trail with a simulated GPS and sets a point in the parents' menu.
 `test_smoke.py` opens the game in Chromium at phone size: start screen, starting the hunt, the parent gate (wrong and right answer) and offline reload via the service worker.
