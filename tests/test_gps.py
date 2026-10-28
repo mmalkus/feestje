@@ -64,6 +64,18 @@ def test_walking_to_the_point_solves_the_step(ctx, base_url):
     expect(page.get_by_role("button", name="Op pad!")).to_be_visible()
 
 
+def test_compass_follows_a_phone_held_up(ctx, base_url):
+    page = start_trail(ctx, base_url)
+    page.get_by_role("button", name="Op pad!").click()
+    expect(page.locator("#gpsDist")).to_have_text(re.compile(r"Nog 20\d meter"))
+    # Android, phone tilted up and rolled: alpha alone says north, but the screen's top points north-west (317°).
+    # The spot is straight south (180°), so the arrow turns 180 - 317 = -137°.
+    page.evaluate("""() => dispatchEvent(new DeviceOrientationEvent('deviceorientationabsolute',
+        { alpha: 0, beta: 60, gamma: 60, absolute: true }))""")
+    expect(page.locator("#needle")).to_have_attribute("style", re.compile(r"rotate\(-137\.1\d*deg\)"))
+    expect(page.locator("#rose")).to_have_attribute("style", re.compile(r"rotate\(42\.8\d*deg\)"))
+
+
 def test_parent_can_approve_the_point(ctx, base_url):
     page = start_trail(ctx, base_url)
     page.get_by_role("button", name="Op pad!").click()
